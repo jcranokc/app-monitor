@@ -686,6 +686,31 @@ final class AppMonitorCoreTests: XCTestCase {
         XCTAssertTrue(records[0].requiresAdmin)
     }
 
+    func testMacAppStoreOutdatedParserAllowsDuplicateBundleIDs() {
+        let primary = sampleApp(name: "Sample App", bundleID: "com.example.sample", path: "/Applications/Sample.app")
+        let duplicate = sampleApp(name: "Sample App Copy", bundleID: "com.example.sample", path: "/Volumes/Backup/Sample.app")
+        let checkedAt = Date(timeIntervalSince1970: 2_025)
+        let json = """
+        [
+          {
+            "appID": 123456,
+            "bundleID": "com.example.sample",
+            "title": "Sample App",
+            "installedVersion": "1.0",
+            "version": "2.0"
+          }
+        ]
+        """
+
+        let records = MacAppStoreUpdateProvider.parseOutdated(json: json, apps: [primary, duplicate], checkedAt: checkedAt)
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].appID, primary.id)
+        XCTAssertEqual(records[0].appPath, primary.path)
+        XCTAssertEqual(records[0].bundleIdentifier, "com.example.sample")
+        XCTAssertEqual(records[0].availableVersion, "2.0")
+    }
+
     func testMacAppStoreOutdatedParserReadsMasSevenSingleObjectOutput() {
         let app = sampleApp(
             name: "Did I Copy It?",

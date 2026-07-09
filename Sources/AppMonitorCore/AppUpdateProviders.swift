@@ -125,9 +125,7 @@ public struct MacAppStoreUpdateProvider: AppUpdateProvider, @unchecked Sendable 
         guard let objects = jsonObjectList(from: json) else {
             return []
         }
-        let appsByBundleID = Dictionary(uniqueKeysWithValues: apps.compactMap { app in
-            app.bundleIdentifier.map { ($0, app) }
-        })
+        let appsByBundleID = appLookupByBundleID(apps)
 
         return objects.compactMap { object in
             let bundleID = stringValue(
@@ -188,6 +186,18 @@ public struct MacAppStoreUpdateProvider: AppUpdateProvider, @unchecked Sendable 
             )
         }
     }
+}
+
+private func appLookupByBundleID(_ apps: [MonitoredApp]) -> [String: MonitoredApp] {
+    var lookup: [String: MonitoredApp] = [:]
+    for app in apps {
+        guard let bundleIdentifier = app.bundleIdentifier,
+              lookup[bundleIdentifier] == nil else {
+            continue
+        }
+        lookup[bundleIdentifier] = app
+    }
+    return lookup
 }
 
 public struct HomebrewUpdateProvider: AppUpdateProvider, @unchecked Sendable {
