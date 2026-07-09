@@ -172,7 +172,7 @@ private struct SidebarView: View {
                     .buttonStyle(.plain)
                 }
 
-                SidebarGroup(title: "") {
+                SidebarGroup(title: "Review & Maintenance") {
                     Button {
                         model.navigate(.warnings)
                     } label: {
@@ -188,7 +188,7 @@ private struct SidebarView: View {
                     Button {
                         model.navigate(.cleanup)
                     } label: {
-                        SidebarMetricItem(title: "Cleanup Suggestions", systemImage: "shield.lefthalf.filled", value: compactBytes(potentialSavingsBytes), badgeColor: DashboardTheme.accent.opacity(0.12), valueColor: DashboardTheme.accent, isSelected: model.destination == .cleanup)
+                        SidebarMetricItem(title: "Quarantine Review", systemImage: "shield.lefthalf.filled", value: compactBytes(potentialSavingsBytes), badgeColor: DashboardTheme.accent.opacity(0.12), valueColor: DashboardTheme.accent, isSelected: model.destination == .cleanup)
                     }
                     .buttonStyle(.plain)
                     Button {
@@ -2231,7 +2231,7 @@ private struct WarningsScreen: View {
         let warnings = visibleWarnings
 
         VStack(alignment: .leading, spacing: 16) {
-            ScreenHeader(title: "Warnings", subtitle: "Potential issues that may impact performance, security, or storage.")
+            ScreenHeader(title: "Warnings", subtitle: "Potential issues grouped by app, affected path, and severity.")
                 .padding(.top, 6)
 
             LazyVGrid(columns: warningSummaryColumns, spacing: 12) {
@@ -2615,10 +2615,21 @@ private struct WarningListRow: View {
             WarningSeverityGlyph(severity: warning.severity)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(warning.title)
+                Text(warning.appName)
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(DashboardTheme.primaryText)
                     .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(warning.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(warningSeverityColor(warning.severity))
+                        .lineLimit(1)
+                    Text(primaryAffectedPath(for: warning))
+                        .font(.caption)
+                        .foregroundStyle(DashboardTheme.secondaryText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
                 Text(warning.detail)
                     .font(.caption)
                     .foregroundStyle(DashboardTheme.secondaryText)
@@ -2627,12 +2638,11 @@ private struct WarningListRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(warning.appName)
+            Text(warning.category.rawValue)
                 .font(.caption)
                 .foregroundStyle(DashboardTheme.secondaryText)
                 .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(width: 142, alignment: .leading)
+                .frame(width: 112, alignment: .leading)
 
             Text(warning.statusText ?? "--")
                 .font(.caption.weight(.semibold))
@@ -2667,6 +2677,13 @@ private struct WarningSeverityGlyph: View {
     }
 }
 
+private func primaryAffectedPath(for warning: AppWarningItem) -> String {
+    if let path = warning.affectedItems.first(where: { $0.path != nil })?.path {
+        return path
+    }
+    return warning.appPath
+}
+
 private struct CleanupCenterScreen: View {
     @EnvironmentObject private var model: AppModel
     @State private var showsRunConfirmation = false
@@ -2678,7 +2695,7 @@ private struct CleanupCenterScreen: View {
 
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .bottom, spacing: 16) {
-                ScreenHeader(title: "Cleanup Suggestions", subtitle: "Remove unnecessary files and free up space safely.")
+                ScreenHeader(title: "Quarantine Review", subtitle: "Preview exact paths first, then move approved items to restorable quarantine.")
                     .padding(.top, 6)
                 Spacer()
             }
@@ -2694,10 +2711,10 @@ private struct CleanupCenterScreen: View {
             DashboardCard {
                 VStack(alignment: .leading, spacing: 0) {
                     if displayed.isEmpty {
-                        EmptyCardState(systemImage: "shield.lefthalf.filled", message: model.activeCleanupSuggestions.isEmpty ? "Run Scan to generate cleanup suggestions from safe storage categories." : "No suggestions match this filter.")
+                        EmptyCardState(systemImage: "shield.lefthalf.filled", message: model.activeCleanupSuggestions.isEmpty ? "Run Scan to generate quarantine suggestions from safe storage categories." : "No suggestions match this filter.")
                             .frame(height: 220)
                     } else {
-                        CleanupSuggestionSection(title: "Recommended for Cleanup", suggestions: recommended)
+                        CleanupSuggestionSection(title: "Recommended for Quarantine", suggestions: recommended)
                         if !lowPriority.isEmpty {
                             CleanupSuggestionSection(title: "Low Priority", suggestions: lowPriority)
                         }
@@ -2726,7 +2743,7 @@ private struct CleanupSummaryCard: View {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .center, spacing: 24) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Potential Space to Free")
+                        Text("Potential Quarantine Space")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(DashboardTheme.secondaryText)
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -2744,7 +2761,7 @@ private struct CleanupSummaryCard: View {
                     Spacer(minLength: 18)
 
                     VStack(alignment: .leading, spacing: 7) {
-                        Text("\(model.approvedCleanupCount) Items Approved")
+                        Text("\(model.approvedCleanupCount) Items Queued")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(DashboardTheme.secondaryText)
                         Text(compactBytes(model.approvedCleanupBytes))
@@ -2757,9 +2774,11 @@ private struct CleanupSummaryCard: View {
                     Button {
                         showsRunConfirmation = true
                     } label: {
-                        Text(model.isRunningCleanup ? "Running" : "Review & Clean")
+                        Text(model.isRunningCleanup ? "Running" : "Move to Quarantine")
                             .font(.callout.weight(.semibold))
                             .foregroundStyle(model.approvedCleanupCount == 0 ? DashboardTheme.secondaryText : DashboardTheme.accent)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
                             .frame(width: 126, height: 44)
                             .background(model.approvedCleanupCount == 0 ? Color.black.opacity(0.035) : DashboardTheme.accent.opacity(0.10))
                             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -2872,10 +2891,7 @@ private struct CleanupSortMenu: View {
                 }
             }
             Divider()
-            Button("Approve Visible") {
-                model.approveCleanupSuggestions(model.displayedCleanupSuggestions)
-            }
-            Button("Clear Approved") {
+            Button("Clear Queue") {
                 model.clearApprovedCleanupSuggestions()
             }
         } label: {
@@ -2905,7 +2921,7 @@ private struct CleanupSuggestionSection: View {
                     }
                 }
             }
-            .padding(.bottom, title == "Recommended for Cleanup" ? 16 : 0)
+            .padding(.bottom, title == "Recommended for Quarantine" ? 16 : 0)
         }
     }
 }
@@ -2986,11 +3002,11 @@ private struct CleanupSuggestionListRow: View {
 
             Menu {
                 Button("View Details") { model.focusCleanupSuggestion(suggestion) }
-                Button(isQueued ? "Remove from Cleanup" : "Add to Cleanup") {
+                Button(isQueued ? "Remove from Queue" : "Add to Quarantine Queue") {
                     model.toggleCleanupSuggestionQueued(suggestion)
                 }
                 Divider()
-                Button("Preview") { model.preview(path: suggestion.path) }
+                Button("Open Preview") { model.preview(path: suggestion.path) }
                 Button("Reveal in Finder") { model.revealInFinder(path: suggestion.path) }
                 Button("Reject") { model.rejectCleanupSuggestion(suggestion) }
             } label: {
@@ -3084,6 +3100,7 @@ private struct CleanupSuggestionDetailPanel: View {
                     VStack(alignment: .leading, spacing: 14) {
                         CleanupInspectorHeader(suggestion: suggestion)
                         CleanupMetricStrip(suggestion: suggestion)
+                        CleanupSafetyCard(suggestion: suggestion)
                         CleanupSizeSnapshotCard(suggestion: suggestion)
                         CleanupExplanationCard(suggestion: suggestion)
                         CleanupPreviewCard(suggestion: suggestion)
@@ -3098,8 +3115,8 @@ private struct CleanupSuggestionDetailPanel: View {
                         model.toggleCleanupSuggestionQueued(suggestion)
                     } label: {
                         HStack(spacing: 7) {
-                            Image(systemName: suggestion.state == .approved ? "minus.circle" : "trash")
-                            Text(suggestion.state == .approved ? "Remove from Cleanup" : "Add to Cleanup (\(compactBytes(suggestion.sizeBytes)))")
+                            Image(systemName: suggestion.state == .approved ? "minus.circle" : "archivebox")
+                            Text(suggestion.state == .approved ? "Remove from Queue" : "Add to Quarantine Queue (\(compactBytes(suggestion.sizeBytes)))")
                         }
                         .font(.callout.weight(.semibold))
                         .frame(maxWidth: .infinity, minHeight: 38)
@@ -3116,7 +3133,7 @@ private struct CleanupSuggestionDetailPanel: View {
                 }
                 .padding(14)
             } else {
-                ContentUnavailableView("No Cleanup Suggestion", systemImage: "shield.lefthalf.filled", description: Text("Run a scan or choose a cleanup item to inspect what will be moved to quarantine."))
+                ContentUnavailableView("No Quarantine Suggestion", systemImage: "shield.lefthalf.filled", description: Text("Run a scan or choose an item to inspect exact paths before anything is moved."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -3151,10 +3168,10 @@ private struct CleanupInspectorHeader: View {
                 Spacer(minLength: 4)
 
                 Menu {
-                    Button("Preview") { model.preview(path: suggestion.path) }
+                    Button("Open Preview") { model.preview(path: suggestion.path) }
                     Button("Reveal in Finder") { model.revealInFinder(path: suggestion.path) }
                     Divider()
-                    Button(suggestion.state == .approved ? "Remove from Cleanup" : "Add to Cleanup") {
+                    Button(suggestion.state == .approved ? "Remove from Queue" : "Add to Quarantine Queue") {
                         model.toggleCleanupSuggestionQueued(suggestion)
                     }
                     Button("Reject") { model.rejectCleanupSuggestion(suggestion) }
@@ -3207,6 +3224,59 @@ private struct CleanupMetric: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
+    }
+}
+
+private struct CleanupSafetyCard: View {
+    let suggestion: CleanupSuggestion
+
+    var body: some View {
+        CleanupInspectorCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Safety Steps")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(DashboardTheme.primaryText)
+
+                CleanupSafetyStep(systemImage: "eye", title: "Preview", detail: "Review the exact path before adding it to the queue.")
+                CleanupSafetyStep(systemImage: "archivebox", title: "Quarantine", detail: "Approved items are moved to App Monitor quarantine, not permanently deleted.")
+                CleanupSafetyStep(systemImage: "arrow.counterclockwise", title: "Restore", detail: "History keeps a restore point while the quarantined item remains available.")
+
+                Text("Original path")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(DashboardTheme.secondaryText)
+                    .padding(.top, 2)
+                Text(suggestion.path)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(DashboardTheme.primaryText)
+                    .lineLimit(3)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+}
+
+private struct CleanupSafetyStep: View {
+    let systemImage: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(DashboardTheme.accent)
+                .frame(width: 18, height: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(DashboardTheme.primaryText)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(DashboardTheme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 
@@ -4733,7 +4803,6 @@ private struct StoragePathReviewRow: View {
                 Button("Preview") { model.preview(path: item.path) }
                 Button("Reveal in Finder") { model.revealInFinder(path: item.path) }
                 Button("Move to Quarantine") { model.quarantineStorageItem(item) }
-                Button("Move to Trash") { model.moveStorageItemToTrash(item) }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
@@ -5279,7 +5348,6 @@ private struct StorageExplorerPathRow: View {
                     Button("Preview") { model.preview(path: item.path) }
                     Button("Reveal in Finder") { model.revealInFinder(path: item.path) }
                     Button("Move to Quarantine") { model.quarantineStorageItem(item) }
-                    Button("Move to Trash") { model.moveStorageItemToTrash(item) }
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.headline)
@@ -6216,7 +6284,7 @@ private struct AppDetailPanel: View {
                             Button("Refresh Inventory") {
                                 Task { await model.refreshInventory() }
                             }
-                            Button("Cleanup Suggestions") {
+                            Button("Quarantine Review") {
                                 model.navigate(.cleanup)
                             }
                         } label: {
@@ -6821,7 +6889,6 @@ private struct RelatedFilesSection: View {
                             Button("Preview") { model.preview(path: item.path) }
                             Button("Reveal in Finder") { model.revealInFinder(path: item.path) }
                             Button("Move to Quarantine") { model.quarantineStorageItem(item) }
-                            Button("Move to Trash") { model.moveStorageItemToTrash(item) }
                         }
 
                         if item.id != model.selectedStorageItems.sorted(by: { $0.sizeBytes > $1.sizeBytes }).prefix(5).last?.id {
