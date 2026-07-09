@@ -6,6 +6,8 @@ public enum AppUpdateSource: String, Codable, CaseIterable, Identifiable, Sendab
     case homebrewFormula
     case appleSoftwareUpdate
     case directDownload
+    case metadata
+    case electron
     case unknown
 
     public var id: String { rawValue }
@@ -22,6 +24,10 @@ public enum AppUpdateSource: String, Codable, CaseIterable, Identifiable, Sendab
             return "Apple Software Update"
         case .directDownload:
             return "Direct Download"
+        case .metadata:
+            return "Metadata"
+        case .electron:
+            return "Electron"
         case .unknown:
             return "Unknown"
         }
@@ -411,7 +417,7 @@ public struct AppUpdateEligibility {
             return true
         case .homebrewFormula:
             return settings.includeHomebrewFormulae
-        case .macAppStore, .appleSoftwareUpdate, .directDownload, .unknown:
+        case .macAppStore, .appleSoftwareUpdate, .directDownload, .metadata, .electron, .unknown:
             return false
         }
     }

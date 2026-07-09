@@ -8229,6 +8229,10 @@ private func updateSourceIcon(_ source: AppUpdateSource) -> String {
         return "apple.logo"
     case .directDownload:
         return "arrow.down.app"
+    case .metadata:
+        return "tag"
+    case .electron:
+        return "cpu"
     case .unknown:
         return "questionmark.app"
     }

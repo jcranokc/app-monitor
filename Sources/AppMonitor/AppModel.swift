@@ -2571,6 +2571,8 @@ final class AppModel: ObservableObject {
         }
         if settings.includeDirectDownloadDetection {
             providers.append(DirectDownloadUpdateProvider())
+            providers.append(ElectronUpdateProvider())
+            providers.append(MetadataUpdateProvider())
         }
         return providers
     }
@@ -2583,8 +2585,12 @@ final class AppModel: ObservableObject {
             return HomebrewUpdateProvider(includeFormulae: true)
         case .appleSoftwareUpdate:
             return AppleSoftwareUpdateProvider()
-        case .directDownload, .unknown:
+        case .directDownload:
             return DirectDownloadUpdateProvider()
+        case .electron:
+            return ElectronUpdateProvider()
+        case .metadata, .unknown:
+            return MetadataUpdateProvider()
         }
     }
 

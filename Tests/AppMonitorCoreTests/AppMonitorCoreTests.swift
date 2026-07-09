@@ -822,6 +822,104 @@ final class AppMonitorCoreTests: XCTestCase {
         XCTAssertEqual(item.releaseNotesURL?.absoluteString, "https://example.com/releases/2.0")
     }
 
+    func testSparkleAppcastParserReadsChildVersionElements() throws {
+        let xml = """
+        <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+          <channel>
+            <item>
+              <title>0.41.0</title>
+              <sparkle:version>100</sparkle:version>
+              <sparkle:shortVersionString>0.41.0</sparkle:shortVersionString>
+              <enclosure url="https://example.com/CodexBar.zip" />
+            </item>
+          </channel>
+        </rss>
+        """
+
+        let item = try SparkleAppcastParser.latestItem(from: Data(xml.utf8))
+
+        XCTAssertEqual(item.version, "0.41.0")
+        XCTAssertEqual(item.url?.absoluteString, "https://example.com/CodexBar.zip")
+    }
+
+    func testMetadataProviderMatchesHomebrewCaskMetadataForNonBrewApps() {
+        let app = sampleApp(
+            name: "AltTab",
+            bundleID: "com.lwouis.alt-tab-macos",
+            path: "/Applications/AltTab.app"
+        )
+        let json = """
+        [
+          {
+            "token": "alt-tab",
+            "name": ["AltTab"],
+            "version": "11.4.3",
+            "url": "https://github.com/lwouis/alt-tab-macos/releases/download/v11.4.3/AltTab-11.4.3.zip",
+            "homepage": "https://alt-tab.app/",
+            "desc": "Window switcher"
+          }
+        ]
+        """
+
+        let records = MetadataUpdateProvider.parseCaskMetadata(json: Data(json.utf8), apps: [app], checkedAt: Date(timeIntervalSince1970: 2_450))
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].appID, app.id)
+        XCTAssertEqual(records[0].source, .metadata)
+        XCTAssertEqual(records[0].sourceIdentifier, "homebrew-cask:alt-tab")
+        XCTAssertEqual(records[0].currentVersion, "1.0")
+        XCTAssertEqual(records[0].availableVersion, "11.4.3")
+        XCTAssertEqual(records[0].status, .manualAction)
+        XCTAssertFalse(records[0].canInstall)
+    }
+
+    func testMetadataProviderDisplaysPrimaryCaskVersion() {
+        let app = sampleApp(
+            name: "Claude",
+            bundleID: "com.anthropic.claudefordesktop",
+            version: "1.15962.1",
+            path: "/Applications/Claude.app"
+        )
+        let json = """
+        [
+          {
+            "token": "claude",
+            "name": ["Claude"],
+            "version": "1.19367.0,1a5be1fbf83d1832486e03a667557c18f0a0ec7a",
+            "homepage": "https://claude.ai/download"
+          }
+        ]
+        """
+
+        let records = MetadataUpdateProvider.parseCaskMetadata(json: Data(json.utf8), apps: [app])
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].availableVersion, "1.19367.0")
+    }
+
+    func testElectronLatestYAMLParserPrefersMacARMDownload() throws {
+        let yaml = """
+        version: 5.50.2
+        files:
+          - url: Validity DemandTools-x64.zip
+            size: 358968011
+          - url: Validity DemandTools-arm64.dmg
+            size: 365304583
+        path: Validity DemandTools-x64.zip
+        releaseNotes: Fixed sync handling
+        releaseDate: '2026-06-19T09:57:58.483Z'
+        """
+
+        let item = try XCTUnwrap(ElectronUpdateProvider.parseLatestYAML(
+            data: Data(yaml.utf8),
+            baseURL: URL(string: "https://dt.validity.com/")!
+        ))
+
+        XCTAssertEqual(item.version, "5.50.2")
+        XCTAssertEqual(item.url?.absoluteString, "https://dt.validity.com/Validity%20DemandTools-arm64.dmg")
+        XCTAssertEqual(item.releaseNotes, "Fixed sync handling")
+    }
+
     func testChangeLogEntryBuildsFromUpdateRecordAndResult() {
         let record = AppUpdateRecord(
             appID: "app",
@@ -1051,6 +1149,7 @@ final class AppMonitorCoreTests: XCTestCase {
     private func sampleApp(
         name: String = "Sample App",
         bundleID: String = "com.example.sample",
+        version: String = "1.0",
         path: String = "/Applications/Sample.app",
         installedAt: Date? = nil,
         bundleCreatedAt: Date? = nil
@@ -1059,7 +1158,7 @@ final class AppMonitorCoreTests: XCTestCase {
             id: "\(bundleID)|\(path)",
             name: name,
             bundleIdentifier: bundleID,
-            version: "1.0",
+            version: version,
             path: path,
             isUserFacing: true,
             installedAt: installedAt,

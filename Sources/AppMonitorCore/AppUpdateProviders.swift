@@ -200,6 +200,84 @@ private func appLookupByBundleID(_ apps: [MonitoredApp]) -> [String: MonitoredAp
     return lookup
 }
 
+private func hasExplicitSparkleFeed(app: MonitoredApp, fileManager: FileManager) -> Bool {
+    let infoURL = URL(fileURLWithPath: app.path)
+        .appendingPathComponent("Contents", isDirectory: true)
+        .appendingPathComponent("Info.plist")
+    guard fileManager.fileExists(atPath: infoURL.path),
+          let info = NSDictionary(contentsOf: infoURL) as? [String: Any] else {
+        return false
+    }
+    return info["SUFeedURL"] is String
+}
+
+private func isHomebrewCaskInstalled(token: String, fileManager: FileManager) -> Bool {
+    fileManager.fileExists(atPath: "/opt/homebrew/Caskroom/\(token)")
+        || fileManager.fileExists(atPath: "/usr/local/Caskroom/\(token)")
+}
+
+private func caskTokenCandidates(for app: MonitoredApp) -> [String] {
+    var candidates: [String] = []
+
+    func append(_ value: String?) {
+        guard let value else { return }
+        for candidate in tokenVariants(from: value) where !candidates.contains(candidate) {
+            candidates.append(candidate)
+        }
+    }
+
+    append(app.name)
+    append(app.bundleIdentifier?.split(separator: ".").last.map(String.init))
+    if let bundleIdentifier = app.bundleIdentifier {
+        let components = bundleIdentifier.split(separator: ".").map(String.init)
+        for size in stride(from: min(3, components.count), through: 1, by: -1) {
+            append(components.suffix(size).joined(separator: "-"))
+        }
+    }
+    append(URL(fileURLWithPath: app.path).deletingPathExtension().lastPathComponent)
+
+    return Array(candidates.prefix(12))
+}
+
+private func tokenVariants(from value: String) -> [String] {
+    let words = wordsForToken(value)
+    guard !words.isEmpty else { return [] }
+
+    var variants = [
+        words.joined(separator: "-"),
+        words.joined()
+    ]
+
+    if words.last == "app" {
+        let withoutApp = words.dropLast()
+        variants.append(withoutApp.joined(separator: "-"))
+        variants.append(withoutApp.joined())
+    }
+    if words.last == "macos" || words.last == "mac" {
+        let withoutPlatform = words.dropLast()
+        variants.append(withoutPlatform.joined(separator: "-"))
+        variants.append(withoutPlatform.joined())
+    }
+
+    var unique: [String] = []
+    for variant in variants where !variant.isEmpty && !unique.contains(variant) {
+        unique.append(variant)
+    }
+    return unique
+}
+
+private func wordsForToken(_ value: String) -> [String] {
+    let expandedCamelCase = value.replacingOccurrences(
+        of: "([a-z0-9])([A-Z])",
+        with: "$1 $2",
+        options: .regularExpression
+    )
+    return expandedCamelCase
+        .lowercased()
+        .split { !$0.isLetter && !$0.isNumber }
+        .map(String.init)
+}
+
 public struct HomebrewUpdateProvider: AppUpdateProvider, @unchecked Sendable {
     public let source: AppUpdateSource = .homebrewCask
     private let brewPath: String
@@ -522,6 +600,222 @@ public struct DirectDownloadUpdateProvider: AppUpdateProvider, @unchecked Sendab
     }
 }
 
+public struct MetadataUpdateProvider: AppUpdateProvider, @unchecked Sendable {
+    public let source: AppUpdateSource = .metadata
+    private let caskAPIURL: URL
+    private let timeout: TimeInterval
+
+    public init(
+        caskAPIURL: URL = URL(string: "https://formulae.brew.sh/api/cask.json")!,
+        timeout: TimeInterval = 20
+    ) {
+        self.caskAPIURL = caskAPIURL
+        self.timeout = timeout
+    }
+
+    public func checkUpdates(apps: [MonitoredApp]) async -> [AppUpdateRecord] {
+        do {
+            var request = URLRequest(url: caskAPIURL)
+            request.timeoutInterval = timeout
+            let (data, _) = try await URLSession.shared.data(for: request)
+            return Self.parseCaskMetadata(json: data, apps: apps, checkedAt: Date())
+        } catch {
+            return [providerUnavailableRecord(
+                source: .metadata,
+                name: "App Metadata",
+                message: "Homebrew Cask metadata could not be loaded: \(error.localizedDescription)"
+            )]
+        }
+    }
+
+    public func performUpdate(record: AppUpdateRecord, mode: UpdateRunMode, runID: String) async -> UpdateItemResult {
+        skippedResult(record: record, runID: runID, message: "Metadata updates require a manual vendor update.")
+    }
+
+    public static func parseCaskMetadata(
+        json data: Data,
+        apps: [MonitoredApp],
+        checkedAt: Date = Date(),
+        fileManager: FileManager = .default
+    ) -> [AppUpdateRecord] {
+        guard let objects = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+
+        let casksByToken = Dictionary(uniqueKeysWithValues: objects.compactMap { object -> (String, [String: Any])? in
+            guard let token = stringValue(object["token"]) else { return nil }
+            return (token, object)
+        })
+
+        var seenAppIDs: Set<String> = []
+        var seenTokens: Set<String> = []
+        var records: [AppUpdateRecord] = []
+
+        for app in apps where app.isUserFacing {
+            guard seenAppIDs.insert(app.id).inserted else { continue }
+            guard !hasExplicitSparkleFeed(app: app, fileManager: fileManager) else { continue }
+
+            for token in caskTokenCandidates(for: app) {
+                guard seenTokens.insert(token).inserted,
+                      !isHomebrewCaskInstalled(token: token, fileManager: fileManager),
+                      let object = casksByToken[token],
+                      let record = metadataRecord(object: object, app: app, checkedAt: checkedAt) else {
+                    continue
+                }
+                records.append(record)
+                break
+            }
+        }
+
+        return records
+    }
+
+    private static func metadataRecord(
+        object: [String: Any],
+        app: MonitoredApp,
+        checkedAt: Date
+    ) -> AppUpdateRecord? {
+        guard let token = stringValue(object["token"]) else { return nil }
+        guard let rawVersion = stringValue(object["version"]) else { return nil }
+        let version = displayVersion(fromCaskVersion: rawVersion)
+        guard VersionComparator.isVersion(version, newerThan: app.version) else {
+            return nil
+        }
+
+        let names = stringArrayValue(object["name"])
+        let displayName = names.first ?? app.name
+        let homepage = stringValue(object["homepage"])
+        let url = stringValue(object["url"]) ?? homepage
+        let description = stringValue(object["desc"])
+        return AppUpdateRecord(
+            appID: app.id,
+            appName: app.name,
+            bundleIdentifier: app.bundleIdentifier,
+            appPath: app.path,
+            source: .metadata,
+            sourceIdentifier: "homebrew-cask:\(token)",
+            currentVersion: app.version,
+            availableVersion: version,
+            status: .manualAction,
+            checkedAt: checkedAt,
+            installActionTitle: "Open Download",
+            installActionURL: url,
+            requiresAdmin: false,
+            requiresRestart: false,
+            canInstall: false,
+            isAutoEligible: false,
+            releaseNotesTitle: "\(displayName) \(version)",
+            releaseNotesSummary: description ?? "Homebrew Cask metadata reports an update from \(app.version ?? "the installed version") to \(version).",
+            releaseNotesURL: homepage,
+            message: "Metadata reports an update. Open the vendor download to update."
+        )
+    }
+
+    private static func displayVersion(fromCaskVersion version: String) -> String {
+        version
+            .split(separator: ",", maxSplits: 1, omittingEmptySubsequences: true)
+            .first
+            .map(String.init) ?? version
+    }
+}
+
+public struct ElectronUpdateProvider: AppUpdateProvider, @unchecked Sendable {
+    public let source: AppUpdateSource = .electron
+    private let timeout: TimeInterval
+    private let fileManager: FileManager
+
+    public init(timeout: TimeInterval = 15, fileManager: FileManager = .default) {
+        self.timeout = timeout
+        self.fileManager = fileManager
+    }
+
+    public func checkUpdates(apps: [MonitoredApp]) async -> [AppUpdateRecord] {
+        var records: [AppUpdateRecord] = []
+        for app in apps where app.isUserFacing {
+            guard let updateURL = electronLatestURL(for: app) else { continue }
+            do {
+                var request = URLRequest(url: updateURL)
+                request.timeoutInterval = timeout
+                let (data, _) = try await URLSession.shared.data(for: request)
+                guard let item = Self.parseLatestYAML(data: data, baseURL: updateURL.deletingLastPathComponent()),
+                      VersionComparator.isVersion(item.version, newerThan: app.version) else {
+                    continue
+                }
+                records.append(AppUpdateRecord(
+                    appID: app.id,
+                    appName: app.name,
+                    bundleIdentifier: app.bundleIdentifier,
+                    appPath: app.path,
+                    source: .electron,
+                    sourceIdentifier: updateURL.absoluteString,
+                    currentVersion: app.version,
+                    availableVersion: item.version,
+                    status: .manualAction,
+                    checkedAt: Date(),
+                    installActionTitle: "Open Download",
+                    installActionURL: item.url?.absoluteString ?? updateURL.absoluteString,
+                    requiresAdmin: false,
+                    requiresRestart: false,
+                    canInstall: false,
+                    isAutoEligible: false,
+                    releaseNotesTitle: "\(app.name) \(item.version)",
+                    releaseNotesSummary: item.releaseNotes?.nilIfEmpty ?? "Electron update metadata reports an update.",
+                    releaseNotesURL: updateURL.absoluteString,
+                    message: "Electron updater metadata reports an update. Open the vendor download to update."
+                ))
+            } catch {
+                continue
+            }
+        }
+        return records
+    }
+
+    public func performUpdate(record: AppUpdateRecord, mode: UpdateRunMode, runID: String) async -> UpdateItemResult {
+        skippedResult(record: record, runID: runID, message: "Electron metadata updates require a manual vendor update.")
+    }
+
+    public static func parseLatestYAML(data: Data, baseURL: URL) -> ElectronLatestItem? {
+        guard let text = String(data: data, encoding: .utf8),
+              let version = yamlValue("version", in: text) else {
+            return nil
+        }
+        let candidates = yamlURLCandidates(in: text)
+        let selected = candidates.first { $0.localizedCaseInsensitiveContains("arm64.dmg") }
+            ?? candidates.first { $0.localizedCaseInsensitiveContains(".dmg") }
+            ?? candidates.first { $0.localizedCaseInsensitiveContains("arm64.zip") }
+            ?? candidates.first
+            ?? yamlValue("path", in: text)
+        let url = selected.flatMap { electronDownloadURL(value: $0, baseURL: baseURL) }
+        return ElectronLatestItem(
+            version: version,
+            url: url,
+            releaseNotes: yamlValue("releaseNotes", in: text)
+        )
+    }
+
+    private func electronLatestURL(for app: MonitoredApp) -> URL? {
+        let configURL = URL(fileURLWithPath: app.path)
+            .appendingPathComponent("Contents", isDirectory: true)
+            .appendingPathComponent("Resources", isDirectory: true)
+            .appendingPathComponent("app-update.yml")
+        guard fileManager.fileExists(atPath: configURL.path),
+              let text = try? String(contentsOf: configURL, encoding: .utf8),
+              yamlValue("provider", in: text) == "generic",
+              let baseValue = yamlValue("url", in: text),
+              !baseValue.localizedCaseInsensitiveContains("electron-vite"),
+              let baseURL = URL(string: baseValue) else {
+            return nil
+        }
+        return URL(string: "latest-mac.yml", relativeTo: baseURL)?.absoluteURL
+    }
+}
+
+public struct ElectronLatestItem: Hashable, Sendable {
+    public let version: String
+    public let url: URL?
+    public let releaseNotes: String?
+}
+
 public struct SparkleAppcastItem: Hashable {
     public let version: String?
     public let title: String?
@@ -629,6 +923,16 @@ private final class SparkleParserDelegate: NSObject, XMLParserDelegate {
             currentTitle += string
         case "description":
             currentSummary += string
+        case "sparkle:shortVersionString", "shortVersionString":
+            let value = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty {
+                currentVersion = value
+            }
+        case "sparkle:version", "version":
+            let value = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty, currentVersion == nil {
+                currentVersion = value
+            }
         case "sparkle:releaseNotesLink", "releaseNotesLink":
             currentReleaseNotesURL = URL(string: string.trimmingCharacters(in: .whitespacesAndNewlines)) ?? currentReleaseNotesURL
         default:
@@ -778,6 +1082,50 @@ private func objectList(from root: Any) -> [[String: Any]]? {
         }
     }
     return [object]
+}
+
+private func yamlValue(_ key: String, in text: String) -> String? {
+    for rawLine in text.components(separatedBy: .newlines) {
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard line.hasPrefix("\(key):") else { continue }
+        let value = String(line.dropFirst(key.count + 1))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return unquotedYAMLValue(value).nilIfEmpty
+    }
+    return nil
+}
+
+private func yamlURLCandidates(in text: String) -> [String] {
+    text.components(separatedBy: .newlines).compactMap { rawLine in
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        if line.hasPrefix("- url:") {
+            return unquotedYAMLValue(String(line.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        if line.hasPrefix("url:") {
+            return unquotedYAMLValue(String(line.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return nil
+    }
+}
+
+private func electronDownloadURL(value: String, baseURL: URL) -> URL? {
+    if let url = URL(string: value, relativeTo: baseURL)?.absoluteURL {
+        return url
+    }
+    let encoded = value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+    return encoded.flatMap { URL(string: $0, relativeTo: baseURL)?.absoluteURL }
+}
+
+private func unquotedYAMLValue(_ value: String) -> String {
+    var value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    if value.hasPrefix("'"), value.hasSuffix("'"), value.count >= 2 {
+        value.removeFirst()
+        value.removeLast()
+    } else if value.hasPrefix("\""), value.hasSuffix("\""), value.count >= 2 {
+        value.removeFirst()
+        value.removeLast()
+    }
+    return value
 }
 
 private func normalizeName(_ value: String) -> String {
