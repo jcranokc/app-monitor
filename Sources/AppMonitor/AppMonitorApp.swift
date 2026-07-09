@@ -13,6 +13,7 @@ struct AppMonitorApp: App {
         WindowGroup("App Monitor", id: appMonitorDashboardWindowID) {
             DashboardView()
                 .environmentObject(model)
+                .preferredColorScheme(model.appearancePreference.colorScheme)
                 .background(
                     MenuBarInstaller()
                         .environmentObject(model)
@@ -52,6 +53,7 @@ struct AppMonitorApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppAppearanceSettings.applyCurrentPreference()
         NSApp.setActivationPolicy(.regular)
         NSApp.applicationIconImage = AppBranding.appIconImage()
     }

@@ -37,19 +37,26 @@ struct DashboardView: View {
 }
 
 private enum DashboardTheme {
-    static let canvas = Color(red: 0.985, green: 0.987, blue: 0.992)
-    static let sidebar = Color(red: 0.952, green: 0.962, blue: 0.98)
-    static let card = Color(nsColor: .windowBackgroundColor)
-    static let cardStroke = Color.black.opacity(0.09)
-    static let softStroke = Color.black.opacity(0.06)
-    static let primaryText = Color(red: 0.055, green: 0.07, blue: 0.105)
-    static let secondaryText = Color(red: 0.39, green: 0.42, blue: 0.49)
-    static let accent = Color(red: 0.36, green: 0.25, blue: 0.95)
-    static let blue = Color(red: 0.21, green: 0.45, blue: 0.92)
-    static let green = Color(red: 0.2, green: 0.64, blue: 0.36)
-    static let orange = Color(red: 0.94, green: 0.55, blue: 0.11)
-    static let amber = Color(red: 0.70, green: 0.52, blue: 0.14)
-    static let red = Color(red: 0.86, green: 0.29, blue: 0.21)
+    static let canvas = Color.appMonitor(light: .init(0.985, 0.987, 0.992), dark: .init(0.055, 0.061, 0.075))
+    static let sidebar = Color.appMonitor(light: .init(0.952, 0.962, 0.98), dark: .init(0.075, 0.084, 0.105))
+    static let sidebarGlow = Color.appMonitor(light: .init(1, 1, 1, 0.72), dark: .init(0.105, 0.116, 0.145, 0.74))
+    static let card = Color.appMonitor(light: .init(1, 1, 1, 0.94), dark: .init(0.115, 0.126, 0.158, 0.97))
+    static let panel = Color.appMonitor(light: .init(1, 1, 1, 0.78), dark: .init(0.09, 0.101, 0.128, 0.9))
+    static let control = Color.appMonitor(light: .init(1, 1, 1, 0.92), dark: .init(0.145, 0.157, 0.194, 0.96))
+    static let controlPressed = Color.appMonitor(light: .init(0, 0, 0, 0.05), dark: .init(1, 1, 1, 0.08))
+    static let subtleFill = Color.appMonitor(light: .init(0, 0, 0, 0.045), dark: .init(1, 1, 1, 0.065))
+    static let track = Color.appMonitor(light: .init(0, 0, 0, 0.06), dark: .init(1, 1, 1, 0.105))
+    static let trackStrong = Color.appMonitor(light: .init(0, 0, 0, 0.12), dark: .init(1, 1, 1, 0.16))
+    static let cardStroke = Color.appMonitor(light: .init(0, 0, 0, 0.09), dark: .init(1, 1, 1, 0.10))
+    static let softStroke = Color.appMonitor(light: .init(0, 0, 0, 0.06), dark: .init(1, 1, 1, 0.075))
+    static let primaryText = Color.appMonitor(light: .init(0.055, 0.07, 0.105), dark: .init(0.91, 0.925, 0.965))
+    static let secondaryText = Color.appMonitor(light: .init(0.39, 0.42, 0.49), dark: .init(0.62, 0.66, 0.74))
+    static let accent = Color.appMonitor(light: .init(0.36, 0.25, 0.95), dark: .init(0.62, 0.54, 1))
+    static let blue = Color.appMonitor(light: .init(0.21, 0.45, 0.92), dark: .init(0.36, 0.62, 1))
+    static let green = Color.appMonitor(light: .init(0.2, 0.64, 0.36), dark: .init(0.35, 0.82, 0.52))
+    static let orange = Color.appMonitor(light: .init(0.94, 0.55, 0.11), dark: .init(1, 0.63, 0.25))
+    static let amber = Color.appMonitor(light: .init(0.70, 0.52, 0.14), dark: .init(0.95, 0.73, 0.26))
+    static let red = Color.appMonitor(light: .init(0.86, 0.29, 0.21), dark: .init(1, 0.42, 0.36))
 }
 
 private struct AppMonitorLogoMark: View {
@@ -215,7 +222,7 @@ private struct SidebarView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             LinearGradient(
-                colors: [DashboardTheme.sidebar, Color.white.opacity(0.72)],
+                colors: [DashboardTheme.sidebar, DashboardTheme.sidebarGlow],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -655,7 +662,7 @@ private struct UsageAnalyticsBucketChart: View {
                             }
                             if bucket.stacks.isEmpty {
                                 RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                    .fill(Color.black.opacity(0.08))
+                                    .fill(DashboardTheme.track)
                                     .frame(height: 4)
                             }
                         }
@@ -717,7 +724,7 @@ private struct UsageAnalyticsTopAppsCard: View {
                                         .lineLimit(1)
                                     GeometryReader { geometry in
                                         ZStack(alignment: .leading) {
-                                            Capsule().fill(Color.black.opacity(0.06))
+                                            Capsule().fill(DashboardTheme.track)
                                             Capsule()
                                                 .fill(DashboardTheme.accent)
                                                 .frame(width: max(5, geometry.size.width * CGFloat(app.percentOfTotal)))
@@ -784,7 +791,7 @@ private struct UsageAnalyticsHeatmapCard: View {
 
     private func heatmapColor(for cell: UsageHeatmapCell) -> Color {
         guard maxSeconds > 0, cell.seconds > 0 else {
-            return Color.black.opacity(0.05)
+            return DashboardTheme.track
         }
         return DashboardTheme.accent.opacity(0.18 + 0.72 * min(1, cell.seconds / maxSeconds))
     }
@@ -1224,7 +1231,7 @@ private struct TimelineMetricCard: View {
         }
         .padding(13)
         .frame(minHeight: 126, alignment: .topLeading)
-        .background(Color.white.opacity(0.92))
+        .background(DashboardTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -1425,7 +1432,7 @@ private struct TimelineAppDayLaneRow: View {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.black.opacity(0.035))
+                        .fill(DashboardTheme.subtleFill)
                     TimelineGridLines()
                     ForEach(lane.sessions) { session in
                         TimelineSessionBar(
@@ -1618,7 +1625,7 @@ private struct TimelineHourBucketRow: View {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.black.opacity(0.035))
+                        .fill(DashboardTheme.subtleFill)
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(DashboardTheme.accent.opacity(0.08 + 0.16 * (bucket.totalDurationSeconds / maxSeconds)))
                     TimelineHourGridLines()
@@ -1712,7 +1719,7 @@ private struct TimelineHourGridLines: View {
             ZStack(alignment: .leading) {
                 ForEach(0...4, id: \.self) { index in
                     Rectangle()
-                        .fill(index == 0 || index == 4 ? Color.black.opacity(0.12) : Color.black.opacity(0.055))
+                        .fill(index == 0 || index == 4 ? DashboardTheme.trackStrong : DashboardTheme.track)
                         .frame(width: index == 0 || index == 4 ? 1 : 0.5)
                         .offset(x: geometry.size.width * CGFloat(index) / 4)
                 }
@@ -1848,7 +1855,7 @@ private struct TimelineLaneRow: View {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.black.opacity(0.035))
+                        .fill(DashboardTheme.subtleFill)
                     TimelineGridLines()
                     ForEach(lane.sessions) { session in
                         TimelineSessionBar(
@@ -1931,7 +1938,7 @@ private struct TimelineGridLines: View {
             ZStack(alignment: .leading) {
                 ForEach(0...24, id: \.self) { hour in
                     Rectangle()
-                        .fill(hour % 6 == 0 ? Color.black.opacity(0.12) : Color.black.opacity(0.045))
+                        .fill(hour % 6 == 0 ? DashboardTheme.trackStrong : DashboardTheme.subtleFill)
                         .frame(width: hour % 6 == 0 ? 1 : 0.5)
                         .offset(x: geometry.size.width * CGFloat(hour) / 24)
                 }
@@ -2159,7 +2166,7 @@ private struct TimelineHeatmapDayRow: View {
                     .accessibilityLabel(heatmapBucketLabel(bucket))
                 } else {
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(Color.black.opacity(0.04))
+                        .fill(DashboardTheme.subtleFill)
                         .frame(maxWidth: .infinity, minHeight: 20)
                         .accessibilityHidden(true)
                 }
@@ -2488,7 +2495,7 @@ private struct WarningMetricCard: View {
         }
         .padding(14)
         .frame(minHeight: 94, alignment: .topLeading)
-        .background(Color.white.opacity(0.92))
+        .background(DashboardTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -2520,7 +2527,7 @@ private struct WarningFilterChip: View {
         .foregroundStyle(isSelected ? .white : DashboardTheme.primaryText)
         .padding(.horizontal, 14)
         .frame(height: 31)
-        .background(isSelected ? DashboardTheme.accent : Color.white.opacity(0.76))
+        .background(isSelected ? DashboardTheme.accent : DashboardTheme.control)
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -2761,7 +2768,7 @@ private struct CleanupSummaryCard: View {
                             .font(.callout.weight(.semibold))
                             .foregroundStyle(model.approvedCleanupCount == 0 ? DashboardTheme.secondaryText : DashboardTheme.accent)
                             .frame(width: 126, height: 44)
-                            .background(model.approvedCleanupCount == 0 ? Color.black.opacity(0.035) : DashboardTheme.accent.opacity(0.10))
+                            .background(model.approvedCleanupCount == 0 ? DashboardTheme.subtleFill : DashboardTheme.accent.opacity(0.10))
                             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                     .buttonStyle(.plain)
@@ -2788,7 +2795,7 @@ private struct CleanupStackedBar: View {
                 let visibleSegments = segments.filter { $0.bytes > 0 }
                 if totalBytes <= 0 || visibleSegments.isEmpty {
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(Color.black.opacity(0.08))
+                        .fill(DashboardTheme.track)
                         .frame(width: geometry.size.width)
                 } else {
                     ForEach(visibleSegments) { segment in
@@ -2846,7 +2853,7 @@ private struct CleanupFilterPills: View {
                         .lineLimit(1)
                         .padding(.horizontal, 14)
                         .frame(height: 30)
-                        .background(model.cleanupSuggestionFilter == filter ? DashboardTheme.accent : Color.black.opacity(0.045))
+                        .background(model.cleanupSuggestionFilter == filter ? DashboardTheme.accent : DashboardTheme.subtleFill)
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -2925,7 +2932,7 @@ private struct CleanupSuggestionListRow: View {
             } label: {
                 ZStack {
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(isQueued ? DashboardTheme.accent : Color.white.opacity(0.92))
+                        .fill(isQueued ? DashboardTheme.accent : DashboardTheme.card)
                         .overlay(
                             RoundedRectangle(cornerRadius: 3, style: .continuous)
                                 .stroke(isQueued ? DashboardTheme.accent : DashboardTheme.secondaryText.opacity(0.72), lineWidth: 1.4)
@@ -3035,7 +3042,7 @@ private struct CleanupSuggestionIcon: View {
                     .frame(width: size, height: size)
             }
         }
-        .background(Color.white.opacity(0.88))
+        .background(DashboardTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
@@ -3120,7 +3127,7 @@ private struct CleanupSuggestionDetailPanel: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(Color.white.opacity(0.78))
+        .background(DashboardTheme.panel)
     }
 }
 
@@ -3163,7 +3170,7 @@ private struct CleanupInspectorHeader: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(DashboardTheme.primaryText)
                         .frame(width: 30, height: 30)
-                        .background(Color.black.opacity(0.035))
+                        .background(DashboardTheme.subtleFill)
                         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
                 .buttonStyle(.plain)
@@ -3226,12 +3233,12 @@ private struct CleanupSizeSnapshotCard: View {
                         VStack(spacing: 0) {
                             ForEach(0..<3, id: \.self) { _ in
                                 Rectangle()
-                                    .fill(Color.black.opacity(0.045))
+                                    .fill(DashboardTheme.subtleFill)
                                     .frame(height: 1)
                                 Spacer()
                             }
                             Rectangle()
-                                .fill(Color.black.opacity(0.045))
+                                .fill(DashboardTheme.subtleFill)
                                 .frame(height: 1)
                         }
 
@@ -3334,7 +3341,7 @@ private struct CleanupInspectorCard<Content: View>: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.9))
+        .background(DashboardTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -3849,7 +3856,7 @@ private struct HistoryDetailPanel: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(Color.white.opacity(0.78))
+        .background(DashboardTheme.panel)
     }
 }
 
@@ -4000,7 +4007,7 @@ private struct HistoryMetricCard: View {
         }
         .padding(14)
         .frame(minHeight: 118, alignment: .topLeading)
-        .background(Color.white.opacity(0.92))
+        .background(DashboardTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -4060,12 +4067,12 @@ private struct HistoryStorageChart: View {
                 VStack(spacing: 0) {
                     ForEach(0..<4, id: \.self) { _ in
                         Rectangle()
-                            .fill(Color.black.opacity(0.055))
+                            .fill(DashboardTheme.track)
                             .frame(height: 1)
                         Spacer()
                     }
                     Rectangle()
-                        .fill(Color.black.opacity(0.055))
+                        .fill(DashboardTheme.track)
                         .frame(height: 1)
                 }
                 .padding(.bottom, 22)
@@ -4165,7 +4172,7 @@ private struct HistoryLegendItem: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 34)
-        .background(Color.white)
+        .background(DashboardTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
@@ -4253,7 +4260,7 @@ private struct HistoryTableRow: View {
                     .foregroundStyle(directAction ? DashboardTheme.accent : DashboardTheme.secondaryText)
                     .padding(.horizontal, 7)
                     .frame(height: 26)
-                    .background((directAction ? DashboardTheme.accent : Color.black).opacity(0.07))
+                    .background(directAction ? DashboardTheme.accent.opacity(0.07) : DashboardTheme.subtleFill)
                     .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
                 .buttonStyle(.plain)
@@ -4402,7 +4409,7 @@ private struct HistoryStatusMetric: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
-        .background(Color.black.opacity(0.035))
+        .background(DashboardTheme.subtleFill)
         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 }
@@ -4525,7 +4532,7 @@ private struct HistoryInspectorCard<Content: View>: View {
             content
         }
         .padding(13)
-        .background(Color.white)
+        .background(DashboardTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -4609,11 +4616,13 @@ private struct SettingsScreen: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ScreenHeader(title: "Settings", subtitle: "Background cadence, saved filters, and launch behavior")
+            ScreenHeader(title: "Settings", subtitle: "Appearance, background cadence, saved filters, and launch behavior")
                 .padding(.top, 6)
 
             DashboardCard {
                 VStack(alignment: .leading, spacing: 16) {
+                    AppearanceSettingsSection()
+                    Divider()
                     Toggle("Launch App Monitor at login", isOn: Binding(
                         get: { model.loginItemEnabled },
                         set: { model.setLoginItemEnabled($0) }
@@ -4778,6 +4787,41 @@ private struct SettingsSectionHeader: View {
     }
 }
 
+private struct AppearanceSettingsSection: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "circle.lefthalf.filled")
+                    .foregroundStyle(DashboardTheme.accent)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Theme")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(DashboardTheme.primaryText)
+                    Text("Applies to the dashboard and menu bar menu")
+                        .font(.caption)
+                        .foregroundStyle(DashboardTheme.secondaryText)
+                }
+                Spacer()
+            }
+
+            Picker("Theme", selection: Binding(
+                get: { model.appearancePreference },
+                set: { model.setAppearancePreference($0) }
+            )) {
+                ForEach(AppAppearancePreference.allCases) { preference in
+                    Text(preference.settingsTitle).tag(preference)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 360)
+        }
+    }
+}
+
 private struct StoragePathReviewRow: View {
     @EnvironmentObject private var model: AppModel
     let item: StorageScanItem
@@ -4923,7 +4967,7 @@ private struct CategorySegmentedStorageBar: View {
                 }
 
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(Color.black.opacity(0.08))
+                    .fill(DashboardTheme.track)
                     .frame(maxWidth: .infinity)
             }
             .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
@@ -5091,7 +5135,7 @@ private struct StorageCategoryTreemap: View {
             .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         } else {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.black.opacity(0.05))
+                .fill(DashboardTheme.track)
         }
     }
 }
@@ -5156,7 +5200,7 @@ private struct TopStorageAppRow: View {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color.black.opacity(0.06))
+                        .fill(DashboardTheme.track)
                     Capsule()
                         .fill(DashboardTheme.accent)
                         .frame(width: max(6, geometry.size.width * CGFloat(Double(row.totalSizeBytes) / Double(maxBytes))))
@@ -5271,7 +5315,7 @@ private struct StorageCrumb: View {
         .foregroundStyle(DashboardTheme.primaryText)
         .padding(.horizontal, 10)
         .frame(height: 28)
-        .background(Color.white)
+        .background(DashboardTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
@@ -5342,7 +5386,7 @@ private struct StorageExplorerPathRow: View {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         Capsule()
-                            .fill(Color.black.opacity(0.08))
+                            .fill(DashboardTheme.track)
                         Capsule()
                             .fill(DashboardTheme.accent)
                             .frame(width: max(5, geometry.size.width * CGFloat(Double(item.sizeBytes) / Double(maxBytes))))
@@ -5360,7 +5404,7 @@ private struct StorageExplorerPathRow: View {
                         .font(.headline)
                         .foregroundStyle(DashboardTheme.primaryText)
                         .frame(width: 26, height: 26)
-                        .background(Color.white)
+                        .background(DashboardTheme.card)
                         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
@@ -5888,7 +5932,7 @@ private struct UsageMetricSummaryCard: View {
         }
         .padding(14)
         .frame(minHeight: 145, alignment: .topLeading)
-        .background(Color.white.opacity(0.92))
+        .background(DashboardTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -5966,7 +6010,7 @@ private struct UsageStackedTrendChart: View {
                     VStack(spacing: compact ? 5 : 8) {
                         ZStack(alignment: .bottom) {
                             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(Color.black.opacity(0.045))
+                                .fill(DashboardTheme.subtleFill)
 
                             if mode == .total {
                                 RoundedRectangle(cornerRadius: 4, style: .continuous)
@@ -6204,7 +6248,7 @@ private func unusedStoragePassUsageSegmentTooltip(bucket: UsageTrendBucket, segm
 
 private func unusedStoragePassHeatmapColor(for seconds: TimeInterval, maxSeconds: TimeInterval) -> Color {
     guard maxSeconds > 0, seconds > 0 else {
-        return Color.black.opacity(0.05)
+        return DashboardTheme.track
     }
     return DashboardTheme.accent.opacity(0.16 + 0.76 * min(1, seconds / maxSeconds))
 }
@@ -6312,7 +6356,7 @@ private struct AppDetailPanel: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(Color.white.opacity(0.78))
+        .background(DashboardTheme.panel)
         .alert("Cleanup needs a cleanup engine", isPresented: $showsCleanupNotice) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -6503,7 +6547,7 @@ private struct WarningDetailsList: View {
                 }
             }
             .padding(12)
-            .background(Color.white)
+            .background(DashboardTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -6538,7 +6582,7 @@ private struct WarningAffectedItemsList: View {
                     }
                 }
             }
-            .background(Color.white)
+            .background(DashboardTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -6662,7 +6706,7 @@ private struct DetailHeader: View {
                     .font(.headline)
                     .foregroundStyle(DashboardTheme.primaryText)
                     .frame(width: 32, height: 32)
-                    .background(Color.white)
+                    .background(DashboardTheme.card)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -6800,7 +6844,7 @@ private struct TopAppsThisPeriodSection: View {
                         }
                     }
                 }
-                .background(Color.white)
+                .background(DashboardTheme.card)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -6860,7 +6904,7 @@ private struct UsageInsightsSection: View {
                 }
             }
             .padding(12)
-            .background(Color.white)
+            .background(DashboardTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -6905,7 +6949,7 @@ private struct RelatedFilesSection: View {
                         }
                     }
                 }
-                .background(Color.white)
+                .background(DashboardTheme.card)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -6995,7 +7039,7 @@ private struct UninstallPlanSheet: View {
                                     }
                                 }
                             }
-                            .background(Color.white)
+                            .background(DashboardTheme.card)
                             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -7231,7 +7275,7 @@ private struct SummaryCard: View {
         .frame(minHeight: 174, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isSoftGreen ? Color.green.opacity(0.06) : Color.white.opacity(0.9))
+                .fill(isSoftGreen ? Color.green.opacity(0.06) : DashboardTheme.card)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -7248,7 +7292,7 @@ private struct DashboardCard<Content: View>: View {
             content
         }
         .padding(16)
-        .background(Color.white.opacity(0.92))
+        .background(DashboardTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -7291,7 +7335,7 @@ private struct ActivityRow: View {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         Capsule()
-                            .fill(Color.black.opacity(0.06))
+                            .fill(DashboardTheme.track)
                         Capsule()
                             .fill(DashboardTheme.accent)
                             .frame(width: max(8, geometry.size.width * row.usageSeconds / maxUsage))
@@ -7494,7 +7538,7 @@ private struct DetailStatBox: View {
         }
         .frame(maxWidth: .infinity, minHeight: 66)
         .padding(.horizontal, 8)
-        .background(Color.white)
+        .background(DashboardTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -7578,12 +7622,12 @@ private struct SearchField: View {
                 .foregroundStyle(DashboardTheme.secondaryText.opacity(0.8))
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
-                .background(Color.black.opacity(0.04))
+                .background(DashboardTheme.subtleFill)
                 .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
         }
         .padding(.horizontal, 12)
         .frame(height: 34)
-        .background(Color.white.opacity(0.92))
+        .background(DashboardTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -7619,7 +7663,7 @@ private struct ToolbarControl: View {
         .foregroundStyle(isProminent ? .white : DashboardTheme.primaryText)
         .padding(.horizontal, compact ? 12 : 16)
         .frame(height: compact ? 32 : 34)
-        .background(isProminent ? DashboardTheme.accent : Color.white.opacity(0.92))
+        .background(isProminent ? DashboardTheme.accent : DashboardTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -7689,7 +7733,7 @@ private struct OperationProgressStrip: View {
             }
         }
         .padding(12)
-        .background(Color.white.opacity(0.92))
+        .background(DashboardTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -7713,7 +7757,7 @@ private struct CardFooterButton: View {
         .font(.callout.weight(.medium))
         .foregroundStyle(DashboardTheme.primaryText)
         .frame(height: 34)
-        .background(Color.white)
+        .background(DashboardTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
@@ -7812,7 +7856,7 @@ private struct DetailFooterButtonStyle: ButtonStyle {
             .font(.callout.weight(.medium))
             .foregroundStyle(DashboardTheme.primaryText)
             .frame(height: 36)
-            .background(configuration.isPressed ? Color.black.opacity(0.05) : Color.white)
+            .background(configuration.isPressed ? DashboardTheme.controlPressed : DashboardTheme.control)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -7948,7 +7992,7 @@ private struct ScanStatusCard: View {
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(Color.white.opacity(0.68))
+        .background(DashboardTheme.panel)
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 9, style: .continuous)

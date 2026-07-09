@@ -246,6 +246,9 @@ final class AppModel: ObservableObject {
     @Published var loginItemEnabled = false
     @Published var loginItemStatus = "Unknown"
     @Published var keepRunningWhenClosed = AppLifecycleSettings.keepRunningWhenClosed
+    @Published var appearancePreference = AppAppearanceSettings.preference {
+        didSet { AppAppearanceSettings.preference = appearancePreference }
+    }
     @Published var trackingStartedAt: Date?
     @Published var destination: DashboardDestination = .overview
     @Published var appListQuickFilter: AppListQuickFilter = .all {
@@ -342,6 +345,7 @@ final class AppModel: ObservableObject {
             fatalError("Unable to create App Monitor datastore: \(error)")
         }
         tracker = UsageTracker(dataStore: dataStore)
+        AppAppearanceSettings.apply(appearancePreference)
         terminationObserver = NotificationCenter.default.addObserver(
             forName: .appMonitorWillTerminate,
             object: nil,
@@ -2057,6 +2061,11 @@ final class AppModel: ObservableObject {
             NSApp.setActivationPolicy(.regular)
             lastMessage = "Dashboard close behavior restored"
         }
+    }
+
+    func setAppearancePreference(_ preference: AppAppearancePreference) {
+        appearancePreference = preference
+        lastMessage = "Appearance set to \(preference.settingsTitle)"
     }
 
     private func updateStorageScanProgress(
