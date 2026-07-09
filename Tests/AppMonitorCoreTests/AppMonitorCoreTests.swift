@@ -686,6 +686,30 @@ final class AppMonitorCoreTests: XCTestCase {
         XCTAssertTrue(records[0].requiresAdmin)
     }
 
+    func testMacAppStoreOutdatedParserReadsMasSevenSingleObjectOutput() {
+        let app = sampleApp(
+            name: "Did I Copy It?",
+            bundleID: "com.underratedsoftware.didicopyit",
+            path: "/Applications/Did I Copy It?.app"
+        )
+        let checkedAt = Date(timeIntervalSince1970: 2_050)
+        let json = """
+        Warning: Found a likely App Store app that is not indexed in Spotlight
+        {"adamID":6784293008,"bundleID":"com.underratedsoftware.didicopyit","displayName":"Did I Copy It?.app","name":"Did I Copy It?","path":"/Applications/Did I Copy It?.app","version":"1.0.0","newVersion":"1.1.0"}
+        """
+
+        let records = MacAppStoreUpdateProvider.parseOutdated(json: json, apps: [app], checkedAt: checkedAt)
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].appID, app.id)
+        XCTAssertEqual(records[0].appName, "Did I Copy It?")
+        XCTAssertEqual(records[0].bundleIdentifier, "com.underratedsoftware.didicopyit")
+        XCTAssertEqual(records[0].sourceIdentifier, "6784293008")
+        XCTAssertEqual(records[0].currentVersion, "1.0.0")
+        XCTAssertEqual(records[0].availableVersion, "1.1.0")
+        XCTAssertEqual(records[0].status, .needsAdmin)
+    }
+
     func testHomebrewOutdatedParserIncludesCasksAndFormulae() {
         let app = sampleApp(name: "Sample App", bundleID: "com.example.sample", path: "/Applications/Sample App.app")
         let checkedAt = Date(timeIntervalSince1970: 2_100)
