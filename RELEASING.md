@@ -4,7 +4,7 @@ App Monitor update discovery is wired through the app's existing direct-download
 
 - `scripts/build_app.sh` writes `CFBundleShortVersionString`, `CFBundleVersion`, and `SUFeedURL` into the packaged app.
 - `scripts/build_app.sh` signs ad hoc by default. Set `APP_MONITOR_SIGN_IDENTITY` to a Developer ID Application identity to sign with hardened runtime and a timestamp.
-- `scripts/package_release.sh` builds `build/App Monitor.app`, creates `build/release/App-Monitor-<version>.zip`, creates a drag-to-Applications DMG with the App Monitor volume icon, and generates `build/release/appcast.xml`.
+- `scripts/package_release.sh` builds `build/App Monitor.app`, creates `build/release/App-Monitor-<version>.zip`, creates `build/release/App-Monitor-Beta.dmg` with the App Monitor volume icon, and generates `build/release/appcast.xml`.
 - `gh release create` publishes the zip, DMG, appcast, and checksum file to a GitHub Release.
 - The app checks `https://github.com/jcranokc/app-monitor/releases/latest/download/appcast.xml` during update scans and opens the release asset when a newer version is available.
 
@@ -29,7 +29,7 @@ Inspect the generated metadata:
 /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "build/App Monitor.app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "build/App Monitor.app/Contents/Info.plist"
 codesign --verify --deep --strict --verbose=2 "build/App Monitor.app"
-hdiutil verify "build/release/App-Monitor-1.1.0.dmg"
+hdiutil verify "build/release/App-Monitor-Beta.dmg"
 cat build/release/appcast.xml
 ```
 
@@ -38,7 +38,7 @@ cat build/release/appcast.xml
 The local packaging command writes:
 
 - `build/release/App-Monitor-<version>.zip`
-- `build/release/App-Monitor-<version>.dmg`
+- `build/release/App-Monitor-Beta.dmg`
 - `build/release/appcast.xml`
 - `build/release/SHA256SUMS`
 
@@ -88,8 +88,8 @@ Verify the result:
 codesign --verify --deep --strict --verbose=2 "build/App Monitor.app"
 spctl --assess --type execute --verbose=4 "build/App Monitor.app"
 xcrun stapler validate "build/App Monitor.app"
-xcrun stapler validate "build/release/App-Monitor-1.1.0.dmg"
-hdiutil verify "build/release/App-Monitor-1.1.0.dmg"
+xcrun stapler validate "build/release/App-Monitor-Beta.dmg"
+hdiutil verify "build/release/App-Monitor-Beta.dmg"
 ```
 
 ## Privacy And Gatekeeper Notes
@@ -110,7 +110,7 @@ git push origin main
 ./scripts/package_release.sh 1.1.0 2
 gh release create v1.1.0 \
   build/release/App-Monitor-1.1.0.zip \
-  build/release/App-Monitor-1.1.0.dmg \
+  build/release/App-Monitor-Beta.dmg \
   build/release/appcast.xml \
   build/release/SHA256SUMS \
   --target main \
