@@ -23,6 +23,9 @@ struct AppMonitorApp: App {
                 .task {
                     await model.bootstrap()
                 }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    model.reconcileInstalledAppUpdates()
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .commands {

@@ -85,14 +85,9 @@ struct InspectorPane: View {
                     DetailLine(title: "Last Result", value: "\(result.status.displayName): \(result.message ?? "No details")")
                 }
                 Button {
-                    if record.canInstall {
-                        model.setUpdateSelected(record, selected: true)
-                        Task { await model.updateSelectedRecords() }
-                    } else {
-                        model.openUpdateSource(record)
-                    }
+                    Task { await model.updateRecord(record) }
                 } label: {
-                    Label(record.canInstall ? "Update App" : record.installActionTitle, systemImage: record.canInstall ? "square.and.arrow.down" : "arrow.up.forward.app")
+                    Label(updateActionTitle(for: record), systemImage: updateActionIcon(for: record))
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -127,14 +122,8 @@ struct InspectorPane: View {
                             Text(entry.summary)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                                .lineLimit(4)
-                            if entry.releaseNotesURL != nil {
-                                Button("Open Release Notes") {
-                                    model.openChangeLogReleaseNotes(entry)
-                                }
-                                .buttonStyle(.plain)
-                                .font(.caption.weight(.semibold))
-                            }
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
                         }
                         .padding(10)
                         .background(Color(nsColor: .controlBackgroundColor))
@@ -199,6 +188,26 @@ struct InspectorPane: View {
                 }
             }
         }
+    }
+
+    private func updateActionTitle(for record: AppUpdateRecord) -> String {
+        if record.source == .macAppStore {
+            return "Open App Store"
+        }
+        if record.status == .adoptable {
+            return "Adopt with Homebrew"
+        }
+        return record.canInstall ? "Update App" : record.installActionTitle
+    }
+
+    private func updateActionIcon(for record: AppUpdateRecord) -> String {
+        if record.source == .macAppStore {
+            return "bag"
+        }
+        if record.status == .adoptable {
+            return "shippingbox"
+        }
+        return record.canInstall ? "square.and.arrow.down" : "arrow.up.forward.app"
     }
 }
 

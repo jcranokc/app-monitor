@@ -109,14 +109,14 @@ App Monitor's packaged app includes a GitHub-hosted appcast URL. Release package
 For local packaging:
 
 ```bash
-./scripts/package_release.sh 1.1.0 2
+./scripts/package_release.sh 1.2.0 3
 ```
 
 For a Homebrew beta cask, publish a versioned beta GitHub release and generate the cask file for a tap:
 
 ```bash
-APP_MONITOR_TAG="v1.1.0-beta.2" ./scripts/package_release.sh 1.1.0 2
-./scripts/generate_homebrew_beta_cask.sh 1.1.0 2
+APP_MONITOR_TAG="v1.2.0-beta.3" ./scripts/package_release.sh 1.2.0 3
+./scripts/generate_homebrew_beta_cask.sh 1.2.0 3
 ```
 
 The unsigned/ad-hoc local package is useful for development. Public distribution should use Developer ID signing and Apple notarization so Gatekeeper can verify the app. See [RELEASING.md](RELEASING.md) for the exact commands, signing options, and local verification steps.

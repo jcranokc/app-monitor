@@ -19,3 +19,6 @@ DerivedData/
 !/docs/assets/
 /docs/assets/*
 !/docs/assets/app-monitor-*.png
+!/docs/releases/
+/docs/releases/*
+!/docs/releases/*.md

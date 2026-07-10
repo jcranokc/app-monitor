@@ -12,7 +12,7 @@ CASK_PATH="$OUTPUT_ROOT/Casks/app-monitor@beta.rb"
 
 usage() {
   echo "Usage: $0 <version> <build-number> [output-root]" >&2
-  echo "Example: $0 1.1.0 2" >&2
+  echo "Example: $0 1.2.0 3" >&2
 }
 
 if [[ -z "$VERSION" || -z "$BUILD_NUMBER" ]]; then

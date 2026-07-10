@@ -86,138 +86,226 @@ private struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 22) {
-                HStack(spacing: 10) {
-                    AppMonitorLogoMark(size: 34)
-                    Text("App Monitor")
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(DashboardTheme.primaryText)
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack(spacing: 10) {
+                        AppMonitorLogoMark(size: 34)
+                        Text("App Monitor")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(DashboardTheme.primaryText)
+                    }
+                    .padding(.top, 14)
+
+                    SidebarGroup(title: "") {
+                        Button {
+                            model.navigate(.overview)
+                        } label: {
+                            SidebarMetricItem(title: "Overview", systemImage: "house", value: "", isSelected: model.destination == .overview)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    SidebarGroup(title: "Updates") {
+                        Button {
+                            model.showUpdates(filter: .apps)
+                        } label: {
+                            SidebarMetricItem(
+                                title: "Apps",
+                                systemImage: "square.grid.2x2",
+                                value: countText(appUpdateCount),
+                                badgeColor: DashboardTheme.blue.opacity(0.14),
+                                valueColor: DashboardTheme.blue,
+                                isSelected: isUpdateFilterSelected(.apps)
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            model.showUpdates(filter: .packages)
+                        } label: {
+                            SidebarMetricItem(
+                                title: "Packages",
+                                systemImage: "terminal",
+                                value: countText(packageUpdateCount),
+                                badgeColor: DashboardTheme.blue.opacity(0.14),
+                                valueColor: DashboardTheme.blue,
+                                isSelected: isUpdateFilterSelected(.packages)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    SidebarGroup(title: "Installed") {
+                        Button {
+                            model.showAppList(.all)
+                        } label: {
+                            SidebarMetricItem(
+                                title: "Apps",
+                                systemImage: "square.grid.2x2",
+                                value: "\(model.rowCount(for: .all))",
+                                isSelected: isAppListSelected(.all)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        Button {
+                            model.showUpdates(filter: .adoptable)
+                        } label: {
+                            SidebarMetricItem(
+                                title: "Adoptable",
+                                systemImage: "shippingbox",
+                                value: countText(model.adoptableUpdateCount),
+                                isSelected: isUpdateFilterSelected(.adoptable)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        Button {
+                            model.showAppList(.recentlyUsed)
+                        } label: {
+                            SidebarMetricItem(
+                                title: "Recently Used",
+                                systemImage: "clock",
+                                value: "\(model.rowCount(for: .recentlyUsed))",
+                                isSelected: isAppListSelected(.recentlyUsed)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        Button {
+                            model.showAppList(.neverUsed)
+                        } label: {
+                            SidebarMetricItem(
+                                title: "Unused",
+                                systemImage: "clock.badge.questionmark",
+                                value: "\(model.rowCount(for: .neverUsed))",
+                                isSelected: isAppListSelected(.neverUsed)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        Button {
+                            model.showAppList(.systemApps)
+                        } label: {
+                            SidebarMetricItem(
+                                title: "System",
+                                systemImage: "gearshape",
+                                value: "\(model.rowCount(for: .systemApps))",
+                                isSelected: isAppListSelected(.systemApps)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    SidebarGroup(title: "Sources") {
+                        Button {
+                            model.showUpdates(filter: .apps)
+                        } label: {
+                            SidebarSourceParentItem(
+                                title: "Apps",
+                                systemImage: "square.grid.2x2",
+                                value: countText(appSourceUpdateCount),
+                                isSelected: isUpdateFilterSelected(.apps)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        ForEach(appSourceRows) { row in
+                            Button {
+                                model.showUpdates(filter: row.filter)
+                            } label: {
+                                SidebarSourceItem(
+                                    title: row.title,
+                                    systemImage: row.systemImage,
+                                    value: countText(row.count),
+                                    isSelected: isUpdateFilterSelected(row.filter)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        Button {
+                            model.showUpdates(filter: .packages)
+                        } label: {
+                            SidebarSourceParentItem(
+                                title: "Packages",
+                                systemImage: "terminal",
+                                value: countText(packageUpdateCount),
+                                isSelected: isUpdateFilterSelected(.packages)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        Button {
+                            model.showUpdates(filter: .source(.homebrewFormula))
+                        } label: {
+                            SidebarSourceItem(
+                                title: "Homebrew",
+                                systemImage: "shippingbox",
+                                value: countText(packageUpdateCount),
+                                isSelected: isUpdateFilterSelected(.source(.homebrewFormula))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    SidebarGroup(title: "Storage") {
+                        Button {
+                            model.navigate(.storage)
+                        } label: {
+                            SidebarMetricItem(title: "Storage Overview", systemImage: "externaldrive", value: "", isSelected: model.destination == .storage)
+                        }
+                        .buttonStyle(.plain)
+                        Button {
+                            model.navigate(.largeFiles)
+                        } label: {
+                            SidebarMetricItem(title: "Large Files", systemImage: "folder", value: "\(largeFileCount)", isSelected: model.destination == .largeFiles)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    SidebarGroup(title: "Usage") {
+                        Button {
+                            model.navigate(.usageTrends)
+                        } label: {
+                            SidebarMetricItem(title: "Usage Trends", systemImage: "chart.xyaxis.line", value: "", isSelected: model.destination == .usageTrends)
+                        }
+                        .buttonStyle(.plain)
+                        Button {
+                            model.navigate(.activityTimeline)
+                        } label: {
+                            SidebarMetricItem(title: "Activity Timeline", systemImage: "point.3.connected.trianglepath.dotted", value: "", isSelected: model.destination == .activityTimeline)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    SidebarGroup(title: "Maintenance") {
+                        Button {
+                            model.navigate(.warnings)
+                        } label: {
+                            SidebarMetricItem(title: "Warnings", systemImage: "exclamationmark.triangle", value: warningCountText, badgeColor: .orange.opacity(0.14), valueColor: DashboardTheme.orange, isSelected: model.destination == .warnings)
+                        }
+                        .buttonStyle(.plain)
+                        Button {
+                            model.navigate(.cleanup)
+                        } label: {
+                            SidebarMetricItem(title: "Quarantine Review", systemImage: "shield.lefthalf.filled", value: compactBytes(potentialSavingsBytes), badgeColor: DashboardTheme.accent.opacity(0.12), valueColor: DashboardTheme.accent, isSelected: model.destination == .cleanup)
+                        }
+                        .buttonStyle(.plain)
+                        Button {
+                            model.navigate(.history)
+                        } label: {
+                            SidebarMetricItem(title: "History", systemImage: "clock.arrow.circlepath", value: "", isSelected: model.destination == .history)
+                        }
+                        .buttonStyle(.plain)
+                        Button {
+                            model.navigate(.settings)
+                        } label: {
+                            SidebarMetricItem(title: "Settings", systemImage: "gearshape", value: "", isSelected: model.destination == .settings)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    ScanStatusCard(lastScan: lastScanDate, nextScan: model.scanSchedule.nextScanAt)
                 }
-                .padding(.top, 14)
-
-                Button {
-                    model.navigate(.overview)
-                } label: {
-                    SidebarSelectionItem(title: "Overview", systemImage: "house", isSelected: model.destination == .overview)
-                }
-                .buttonStyle(.plain)
-
-                SidebarGroup(title: "Applications") {
-                    Button {
-                        model.showAppList(.all)
-                    } label: {
-                        SidebarMetricItem(
-                            title: "All Apps",
-                            systemImage: "square.grid.2x2",
-                            value: "\(model.rowCount(for: .all))",
-                            isSelected: isAppListSelected(.all)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    Button {
-                        model.showAppList(.recentlyUsed)
-                    } label: {
-                        SidebarMetricItem(
-                            title: "Recently Used",
-                            systemImage: "clock",
-                            value: "\(model.rowCount(for: .recentlyUsed))",
-                            isSelected: isAppListSelected(.recentlyUsed)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    Button {
-                        model.showAppList(.neverUsed)
-                    } label: {
-                        SidebarMetricItem(
-                            title: "Never Used",
-                            systemImage: "clock.badge.questionmark",
-                            value: "\(model.rowCount(for: .neverUsed))",
-                            isSelected: isAppListSelected(.neverUsed)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    Button {
-                        model.showAppList(.systemApps)
-                    } label: {
-                        SidebarMetricItem(
-                            title: "System Apps",
-                            systemImage: "gearshape",
-                            value: "\(model.rowCount(for: .systemApps))",
-                            isSelected: isAppListSelected(.systemApps)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                SidebarGroup(title: "Storage") {
-                    Button {
-                        model.navigate(.storage)
-                    } label: {
-                        SidebarMetricItem(title: "Storage Overview", systemImage: "externaldrive", value: "", isSelected: model.destination == .storage)
-                    }
-                    .buttonStyle(.plain)
-                    Button {
-                        model.navigate(.largeFiles)
-                    } label: {
-                        SidebarMetricItem(title: "Large Files", systemImage: "folder", value: "\(largeFileCount)", isSelected: model.destination == .largeFiles)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                SidebarGroup(title: "Usage Analytics") {
-                    Button {
-                        model.navigate(.usageTrends)
-                    } label: {
-                        SidebarMetricItem(title: "Usage Trends", systemImage: "chart.xyaxis.line", value: "", isSelected: model.destination == .usageTrends)
-                    }
-                    .buttonStyle(.plain)
-                    Button {
-                        model.navigate(.activityTimeline)
-                    } label: {
-                        SidebarMetricItem(title: "Activity Timeline", systemImage: "point.3.connected.trianglepath.dotted", value: "", isSelected: model.destination == .activityTimeline)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                SidebarGroup(title: "Review & Maintenance") {
-                    Button {
-                        model.navigate(.warnings)
-                    } label: {
-                        SidebarMetricItem(title: "Warnings", systemImage: "exclamationmark.triangle", value: warningCountText, badgeColor: .orange.opacity(0.14), valueColor: DashboardTheme.orange, isSelected: model.destination == .warnings)
-                    }
-                    .buttonStyle(.plain)
-                    Button {
-                        model.showUpdates()
-                    } label: {
-                        SidebarMetricItem(title: "App Updates", systemImage: "arrow.down.circle", value: updateCountText, badgeColor: DashboardTheme.blue.opacity(0.13), valueColor: DashboardTheme.blue, isSelected: model.destination == .updates)
-                    }
-                    .buttonStyle(.plain)
-                    Button {
-                        model.navigate(.cleanup)
-                    } label: {
-                        SidebarMetricItem(title: "Quarantine Review", systemImage: "shield.lefthalf.filled", value: compactBytes(potentialSavingsBytes), badgeColor: DashboardTheme.accent.opacity(0.12), valueColor: DashboardTheme.accent, isSelected: model.destination == .cleanup)
-                    }
-                    .buttonStyle(.plain)
-                    Button {
-                        model.navigate(.history)
-                    } label: {
-                        SidebarMetricItem(title: "History", systemImage: "clock.arrow.circlepath", value: "", isSelected: model.destination == .history)
-                    }
-                    .buttonStyle(.plain)
-                    Button {
-                        model.navigate(.settings)
-                    } label: {
-                        SidebarMetricItem(title: "Settings", systemImage: "gearshape", value: "", isSelected: model.destination == .settings)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                Spacer(minLength: 16)
-
-                ScanStatusCard(lastScan: lastScanDate, nextScan: model.scanSchedule.nextScanAt)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 20)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
@@ -238,9 +326,43 @@ private struct SidebarView: View {
         return count == 0 ? "" : "\(count)"
     }
 
-    private var updateCountText: String {
-        let count = model.availableUpdateCount
-        return count == 0 ? "" : "\(count)"
+    private var availableUpdateRecords: [AppUpdateRecord] {
+        model.updateRecords.filter { $0.status.countsAsAvailable }
+    }
+
+    private var appUpdateCount: Int {
+        availableUpdateRecords.filter { $0.source != .homebrewFormula }.count
+    }
+
+    private var packageUpdateCount: Int {
+        sourceCount(.homebrewFormula)
+    }
+
+    private var appSourceUpdateCount: Int {
+        appSourceRows.reduce(0) { $0 + $1.count }
+    }
+
+    private var appSourceRows: [SidebarSourceSummary] {
+        var rows = [
+            SidebarSourceSummary(id: "app-store", title: "App Store", systemImage: "bag", count: sourceCount(.macAppStore), filter: .source(.macAppStore)),
+            SidebarSourceSummary(id: "homebrew", title: "Homebrew", systemImage: "shippingbox", count: sourceCount(.homebrewCask), filter: .source(.homebrewCask)),
+            SidebarSourceSummary(id: "sparkle", title: "Sparkle", systemImage: "sparkles", count: sourceCount(.directDownload), filter: .source(.directDownload)),
+            SidebarSourceSummary(id: "metadata", title: "Metadata", systemImage: "tag", count: sourceCount(.metadata), filter: .source(.metadata)),
+            SidebarSourceSummary(id: "electron", title: "Electron", systemImage: "cpu", count: sourceCount(.electron), filter: .source(.electron))
+        ]
+        let appleSoftwareCount = sourceCount(.appleSoftwareUpdate)
+        if appleSoftwareCount > 0 {
+            rows.append(SidebarSourceSummary(id: "apple-software", title: "Apple", systemImage: "apple.logo", count: appleSoftwareCount, filter: .source(.appleSoftwareUpdate)))
+        }
+        return rows
+    }
+
+    private func sourceCount(_ source: AppUpdateSource) -> Int {
+        availableUpdateRecords.filter { $0.source == source }.count
+    }
+
+    private func countText(_ count: Int) -> String {
+        count == 0 ? "" : "\(count)"
     }
 
     private var potentialSavingsBytes: Int64 {
@@ -253,6 +375,10 @@ private struct SidebarView: View {
 
     private func isAppListSelected(_ filter: AppModel.AppListQuickFilter) -> Bool {
         model.destination == .usageTable && model.appListQuickFilter == filter
+    }
+
+    private func isUpdateFilterSelected(_ filter: AppModel.UpdateListFilter) -> Bool {
+        model.destination == .updates && model.updateListFilter == filter
     }
 }
 
@@ -2898,7 +3024,10 @@ private struct CleanupSortMenu: View {
                 }
             }
             Divider()
-            Button("Clear Queue") {
+            Button("Approve Visible") {
+                model.approveCleanupSuggestions(model.displayedCleanupSuggestions)
+            }
+            Button("Clear Approved") {
                 model.clearApprovedCleanupSuggestions()
             }
         } label: {
@@ -3454,44 +3583,44 @@ private struct UpdatesScreen: View {
             DashboardCard {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 10) {
-                        CardHeader(title: "Update Queue", subtitle: "\(model.updateRecords.count) provider record\(model.updateRecords.count == 1 ? "" : "s")")
+                        CardHeader(title: "Update Queue", subtitle: "\(filteredRecords.count) provider record\(filteredRecords.count == 1 ? "" : "s")")
+                        if let filterTitle = model.updateListFilter?.title {
+                            HStack(spacing: 8) {
+                                Label("Filtered: \(filterTitle)", systemImage: "line.3.horizontal.decrease.circle")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(DashboardTheme.accent)
+                                Button("Show All") {
+                                    model.showUpdates()
+                                }
+                                .font(.caption.weight(.semibold))
+                                .buttonStyle(.plain)
+                                .foregroundStyle(DashboardTheme.blue)
+                            }
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
+                            .background(DashboardTheme.accent.opacity(0.09))
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        }
                         Spacer()
-                        Button("Select Available") {
-                            model.selectAllAvailableUpdates()
-                        }
-                        .disabled(model.updateRecords.isEmpty || model.isCheckingUpdates || model.isRunningUpdates)
-                        Button("Clear") {
-                            model.clearSelectedUpdates()
-                        }
-                        .disabled(model.selectedUpdateIDs.isEmpty)
-                        Button {
-                            Task { await model.checkForUpdates() }
-                        } label: {
-                            Label("Check Installed Apps", systemImage: "arrow.clockwise")
-                        }
-                        .disabled(model.isCheckingUpdates || model.isRunningUpdates)
-                        Button {
-                            Task { await model.updateSelectedRecords() }
-                        } label: {
-                            Label("Update Selected", systemImage: "square.and.arrow.down")
-                        }
-                        .disabled(!hasSelectedInstallableUpdates || model.isCheckingUpdates || model.isRunningUpdates)
-                        Button {
-                            Task { await model.updateAllEligibleRecords() }
-                        } label: {
-                            Label("Update All Eligible", systemImage: "bolt.fill")
-                        }
-                        .disabled(model.autoEligibleUpdateCount == 0 || model.isCheckingUpdates || model.isRunningUpdates)
                     }
 
-                    if model.updateRecords.isEmpty {
-                        EmptyCardState(systemImage: "arrow.down.circle", message: "Run an installed-app update check to populate available app and system updates.")
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 10) {
+                            selectionControls
+                        }
+                        HStack(spacing: 10) {
+                            updateControls
+                        }
+                    }
+
+                    if filteredRecords.isEmpty {
+                        EmptyCardState(systemImage: "arrow.down.circle", message: emptyUpdateMessage)
                             .frame(height: 220)
                     } else {
                         VStack(spacing: 0) {
                             UpdatesTableHeader()
                             Divider()
-                            ForEach(model.updateRecords.prefix(120)) { record in
+                            ForEach(filteredRecords.prefix(120)) { record in
                                 UpdatesTableRow(record: record)
                                 Divider()
                             }
@@ -3519,6 +3648,58 @@ private struct UpdatesScreen: View {
 
     private var hasSelectedInstallableUpdates: Bool {
         model.selectedUpdateRecords.contains { $0.canInstall }
+    }
+
+    @ViewBuilder
+    private var selectionControls: some View {
+        Button("Select Available") {
+            model.selectAllAvailableUpdates()
+        }
+        .disabled(filteredRecords.isEmpty || model.isCheckingUpdates || model.isRunningUpdates)
+
+        Button("Clear") {
+            model.clearSelectedUpdates()
+        }
+        .disabled(model.selectedUpdateIDs.isEmpty)
+    }
+
+    @ViewBuilder
+    private var updateControls: some View {
+        Button {
+            Task { await model.checkForUpdates() }
+        } label: {
+            Label("Check Installed Apps", systemImage: "arrow.clockwise")
+        }
+        .disabled(model.isCheckingUpdates || model.isRunningUpdates)
+
+        Button {
+            Task { await model.updateSelectedRecords() }
+        } label: {
+            Label("Update Selected", systemImage: "square.and.arrow.down")
+        }
+        .disabled(!hasSelectedInstallableUpdates || model.isCheckingUpdates || model.isRunningUpdates)
+
+        Button {
+            Task { await model.adoptAndUpdateAllRecords() }
+        } label: {
+            Label("Adopt & Update All", systemImage: "shippingbox.fill")
+        }
+        .disabled(model.adoptAndUpdateAllCount == 0 || model.isCheckingUpdates || model.isRunningUpdates)
+        .help("Adopt every available Homebrew app and install all available Homebrew updates.")
+    }
+
+    private var filteredRecords: [AppUpdateRecord] {
+        model.filteredUpdateRecords
+    }
+
+    private var emptyUpdateMessage: String {
+        if model.updateRecords.isEmpty {
+            return "Run an update check to populate available app and system updates."
+        }
+        if let filterTitle = model.updateListFilter?.title {
+            return "No updates match \(filterTitle)."
+        }
+        return "No update records match the current view."
     }
 }
 
@@ -3552,7 +3733,7 @@ private struct ChangeLogTimelineRow: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(DashboardTheme.primaryText)
                     .lineLimit(1)
-                Text(entry.summary)
+                Text(changeLogPreview(entry.summary))
                     .font(.caption)
                     .foregroundStyle(DashboardTheme.secondaryText)
                     .lineLimit(2)
@@ -3560,13 +3741,6 @@ private struct ChangeLogTimelineRow: View {
                     Text(entry.source.displayName)
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(DashboardTheme.blue)
-                    if entry.releaseNotesURL != nil {
-                        Button("Release Notes") {
-                            model.openChangeLogReleaseNotes(entry)
-                        }
-                        .buttonStyle(.plain)
-                        .font(.caption2.weight(.semibold))
-                    }
                 }
             }
         }
@@ -3684,14 +3858,39 @@ private struct UpdatesTableRow: View {
                 .font(.caption)
                 .foregroundStyle(DashboardTheme.secondaryText)
                 .frame(width: 112, alignment: .leading)
-            Button(record.canInstall ? "Source" : "Open") {
-                model.openUpdateSource(record)
+            Button(actionTitle) {
+                model.selectUpdate(record)
+                if record.canInstall {
+                    Task { await model.updateRecord(record) }
+                } else {
+                    model.openUpdateSource(record)
+                }
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
             .frame(width: 82, alignment: .trailing)
+            .disabled(record.canInstall && (model.isCheckingUpdates || model.isRunningUpdates))
         }
         .padding(.vertical, 9)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            model.selectUpdate(record)
+        }
+    }
+
+    private var actionTitle: String {
+        guard record.canInstall else { return "Open" }
+        if record.status == .adoptable {
+            return "Adopt..."
+        }
+        switch record.source {
+        case .macAppStore:
+            return "Open"
+        case .directDownload, .metadata, .electron:
+            return "Run"
+        case .homebrewCask, .homebrewFormula, .appleSoftwareUpdate, .unknown:
+            return "Update"
+        }
     }
 }
 
@@ -4791,6 +4990,20 @@ private struct SettingsScreen: View {
                         get: { model.updateSettings.includeHomebrewFormulae },
                         set: { model.updateUpdateSourceSettings(includeHomebrewFormulae: $0) }
                     ))
+                    HStack(spacing: 12) {
+                        Label("Homebrew authorization", systemImage: "key.horizontal")
+                            .foregroundStyle(DashboardTheme.primaryText)
+                        Spacer()
+                        Button {
+                            Task { await model.forgetSavedHomebrewAdministratorPassword() }
+                        } label: {
+                            Label("Forget Saved Password", systemImage: "trash")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(model.isRunningUpdates)
+                        .help("Remove App Monitor's saved Homebrew administrator password from your Mac Keychain.")
+                    }
                     Toggle("Include macOS and Safari updates", isOn: Binding(
                         get: { model.updateSettings.includeAppleSoftwareUpdates },
                         set: { model.updateUpdateSourceSettings(includeAppleSoftwareUpdates: $0) }
@@ -4846,13 +5059,14 @@ private struct SettingsSectionHeader: View {
     let systemImage: String
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Image(systemName: systemImage)
-                .foregroundStyle(DashboardTheme.accent)
-                .frame(width: 18)
+                .foregroundStyle(DashboardTheme.blue)
+                .frame(width: 24)
             Text(title)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(DashboardTheme.primaryText)
+            Spacer()
         }
     }
 }
@@ -5610,6 +5824,19 @@ private struct DashboardToolbar: View {
                         Button("500 MB+") { model.filterState.minimumStorageBytes = 500_000_000 }
                         Button("1 GB+") { model.filterState.minimumStorageBytes = 1_000_000_000 }
                     }
+                    Menu("Usage time") {
+                        ForEach(AppUsageTimeFilter.allCases) { usageTime in
+                            Button {
+                                model.filterState.usageTime = usageTime
+                            } label: {
+                                if model.filterState.usageTime == usageTime {
+                                    Label(usageTime.rawValue, systemImage: "checkmark")
+                                } else {
+                                    Text(usageTime.rawValue)
+                                }
+                            }
+                        }
+                    }
                     Menu("Date range") {
                         ForEach(AppDateRangeFilter.allCases) { range in
                             Button {
@@ -5767,7 +5994,7 @@ private struct DashboardToolbar: View {
         guard model.updateProgress.isVisible else {
             return OperationProgressSnapshot(
                 title: model.isCheckingUpdates ? "Checking installed app updates" : "Running installed app updates",
-                detail: model.isCheckingUpdates ? "Checking installed app providers..." : "Installing selected app updates...",
+                detail: model.isCheckingUpdates ? "Checking providers..." : "Installing selected app updates...",
                 completedUnitCount: 0,
                 totalUnitCount: max(model.updateRecords.count, 1),
                 currentPath: nil,
@@ -6352,6 +6579,7 @@ private struct AppDetailPanel: View {
                                 TimelineSessionDetailCard(session: session)
                             }
                             DetailHeader(row: row)
+                            DetailUpdateSection(row: row)
                             DetailQuickStats(row: row)
                             DetailMiniUsageChart(rows: selectedDailyRows)
                             TopAppsThisPeriodSection()
@@ -6817,6 +7045,293 @@ private struct DetailQuickStats: View {
             DetailStatBox(title: "Last Opened", value: AppMonitorFormatting.shortDateTime(row.lastSeen))
             DetailStatBox(title: "Installed", value: row.app.installedAt.map(AppMonitorFormatting.day) ?? "Unknown")
         }
+    }
+}
+
+private struct DetailUpdateSection: View {
+    @EnvironmentObject private var model: AppModel
+    let row: AppUsageRow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "Update", trailing: statusText)
+
+            if let adoptRecord,
+               adoptRecord.id != record?.id {
+                homebrewAdoptionCard(adoptRecord)
+            }
+
+            if let record {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: updateSourceIcon(record.source))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(updateStatusColor(record.status))
+                            .frame(width: 28, height: 28)
+                            .background(updateStatusColor(record.status).opacity(0.11))
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(record.source.displayName)
+                                .font(.callout.weight(.semibold))
+                                .foregroundStyle(DashboardTheme.primaryText)
+                                .lineLimit(1)
+                            Text(versionText(record))
+                                .font(.caption)
+                                .foregroundStyle(DashboardTheme.secondaryText)
+                                .lineLimit(2)
+                        }
+
+                        Spacer()
+                        UpdateStatusBadge(record: record)
+                    }
+
+                    if let message = resultMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(DashboardTheme.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Button {
+                        if record.canInstall {
+                            Task { await model.updateRecord(record) }
+                        } else {
+                            model.openUpdateSource(record)
+                        }
+                    } label: {
+                        Label(actionTitle(for: record), systemImage: record.canInstall ? "play.fill" : "safari")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(record.canInstall && (model.isCheckingUpdates || model.isRunningUpdates))
+
+                    if !changeLogs.isEmpty {
+                        Divider()
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Change Log")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(DashboardTheme.secondaryText)
+                            ForEach(changeLogs.prefix(3)) { entry in
+                                DetailChangeLogEntry(entry: entry)
+                            }
+                        }
+                    } else if let summary = record.releaseNotesSummary ?? record.message {
+                        Divider()
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Change Log")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(DashboardTheme.secondaryText)
+                            ReleaseNotesFormattedView(title: record.releaseNotesTitle ?? record.appName, summary: summary)
+                        }
+                    }
+                }
+                .padding(12)
+                .background(DashboardTheme.card)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(DashboardTheme.softStroke)
+                )
+            } else {
+                EmptyCardState(systemImage: "arrow.down.circle", message: "No update record is loaded for \(row.app.name).")
+                    .frame(height: 92)
+            }
+        }
+    }
+
+    private func homebrewAdoptionCard(_ record: AppUpdateRecord) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "shippingbox")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(DashboardTheme.orange)
+                    .frame(width: 28, height: 28)
+                    .background(DashboardTheme.orange.opacity(0.11))
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Homebrew")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(DashboardTheme.primaryText)
+                    Text(versionText(record))
+                        .font(.caption)
+                        .foregroundStyle(DashboardTheme.secondaryText)
+                        .lineLimit(2)
+                }
+
+                Spacer()
+                UpdateStatusBadge(record: record)
+            }
+
+            if let message = record.message {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(DashboardTheme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button {
+                model.selectUpdate(record)
+                Task { await model.updateRecord(record) }
+            } label: {
+                Label("Adopt with Homebrew", systemImage: "shippingbox")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(model.isCheckingUpdates || model.isRunningUpdates)
+        }
+        .padding(12)
+        .background(DashboardTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(DashboardTheme.softStroke)
+        )
+    }
+
+    private var record: AppUpdateRecord? {
+        model.selectedUpdateRecord
+    }
+
+    private var adoptRecord: AppUpdateRecord? {
+        model.adoptableUpdateRecord(for: row)
+    }
+
+    private var changeLogs: [AppChangeLogEntry] {
+        model.selectedChangeLogEntries
+    }
+
+    private var statusText: String {
+        record?.status.displayName ?? "None"
+    }
+
+    private var resultMessage: String? {
+        model.selectedUpdateResult?.message ?? record?.message
+    }
+
+    private func actionTitle(for record: AppUpdateRecord) -> String {
+        guard record.canInstall else { return record.installActionTitle }
+        if record.status == .adoptable {
+            return "Adopt with Homebrew"
+        }
+        switch record.source {
+        case .macAppStore:
+            return "Open App Store"
+        case .directDownload, .metadata, .electron:
+            return "Run Guided Update"
+        case .homebrewCask, .homebrewFormula, .appleSoftwareUpdate, .unknown:
+            return "Update"
+        }
+    }
+
+    private func versionText(_ record: AppUpdateRecord) -> String {
+        if record.status == .adoptable {
+            let installed = record.currentVersion ?? "installed"
+            if let availableVersion = record.availableVersion {
+                return "Installed: \(installed) -> Cask: \(availableVersion)"
+            }
+            return "Installed: \(installed)"
+        }
+        if let current = record.currentVersion, let available = record.availableVersion {
+            return "\(current) -> \(available)"
+        }
+        if let available = record.availableVersion {
+            return "Available: \(available)"
+        }
+        if let current = record.currentVersion {
+            return "Installed: \(current)"
+        }
+        return record.sourceIdentifier
+    }
+}
+
+private struct DetailChangeLogEntry: View {
+    @EnvironmentObject private var model: AppModel
+    let entry: AppChangeLogEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(entry.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(DashboardTheme.primaryText)
+                    .lineLimit(2)
+                Spacer()
+                Text(versionTransition(entry))
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(DashboardTheme.secondaryText)
+                    .lineLimit(1)
+            }
+
+            ScrollView {
+                ReleaseNotesFormattedView(title: entry.title, summary: entry.summary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 360)
+
+            HStack(spacing: 8) {
+                Text(AppMonitorFormatting.shortDateTime(entry.capturedAt))
+                    .font(.caption2)
+                    .foregroundStyle(DashboardTheme.secondaryText)
+            }
+        }
+    }
+}
+
+private enum ReleaseNoteLineKind {
+    case heading
+    case bullet
+    case paragraph
+}
+
+private struct ReleaseNoteLine: Identifiable {
+    let id: Int
+    let kind: ReleaseNoteLineKind
+    let text: String
+}
+
+private struct ReleaseNotesFormattedView: View {
+    let title: String
+    let summary: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(lines) { line in
+                switch line.kind {
+                case .heading:
+                    Text(line.text)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(DashboardTheme.primaryText)
+                        .padding(.top, line.id == 0 ? 0 : 4)
+                        .textSelection(.enabled)
+                case .bullet:
+                    HStack(alignment: .top, spacing: 7) {
+                        Circle()
+                            .fill(DashboardTheme.secondaryText.opacity(0.75))
+                            .frame(width: 4, height: 4)
+                            .padding(.top, 6)
+                        Text(line.text)
+                            .font(.caption)
+                            .foregroundStyle(DashboardTheme.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                case .paragraph:
+                    Text(line.text)
+                        .font(.caption)
+                        .foregroundStyle(DashboardTheme.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    private var lines: [ReleaseNoteLine] {
+        releaseNoteLines(title: title, summary: summary)
     }
 }
 
@@ -8041,6 +8556,81 @@ private struct SidebarMetricItem: View {
     }
 }
 
+private struct SidebarSourceSummary: Identifiable {
+    let id: String
+    let title: String
+    let systemImage: String
+    let count: Int
+    let filter: AppModel.UpdateListFilter
+}
+
+private struct SidebarSourceParentItem: View {
+    let title: String
+    let systemImage: String
+    let value: String
+    var isSelected = false
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isSelected ? DashboardTheme.accent : DashboardTheme.secondaryText)
+                .frame(width: 10)
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(isSelected ? DashboardTheme.accent : DashboardTheme.primaryText)
+                .frame(width: 18)
+            Text(title)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(isSelected ? DashboardTheme.accent : DashboardTheme.primaryText)
+            Spacer()
+            if !value.isEmpty {
+                Text(value)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(isSelected ? DashboardTheme.accent : DashboardTheme.secondaryText)
+                    .monospacedDigit()
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+        .contentShape(Rectangle())
+        .background(isSelected ? DashboardTheme.accent.opacity(0.1) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+}
+
+private struct SidebarSourceItem: View {
+    let title: String
+    let systemImage: String
+    let value: String
+    var isSelected = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(isSelected ? DashboardTheme.accent : DashboardTheme.primaryText)
+                .frame(width: 18)
+            Text(title)
+                .font(.callout)
+                .foregroundStyle(isSelected ? DashboardTheme.accent : DashboardTheme.primaryText)
+            Spacer()
+            if !value.isEmpty {
+                Text(value)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(isSelected ? DashboardTheme.accent : DashboardTheme.secondaryText)
+                    .monospacedDigit()
+            }
+        }
+        .padding(.leading, 40)
+        .padding(.trailing, 12)
+        .frame(height: 30)
+        .contentShape(Rectangle())
+        .background(isSelected ? DashboardTheme.accent.opacity(0.1) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+}
+
 private struct ScanStatusCard: View {
     let lastScan: Date?
     let nextScan: Date?
@@ -8402,6 +8992,10 @@ private func updateSourceIcon(_ source: AppUpdateSource) -> String {
         return "apple.logo"
     case .directDownload:
         return "arrow.down.app"
+    case .metadata:
+        return "tag"
+    case .electron:
+        return "cpu"
     case .unknown:
         return "questionmark.app"
     }
@@ -8413,7 +9007,7 @@ private func updateStatusColor(_ status: AppUpdateStatus) -> Color {
         return DashboardTheme.blue
     case .updated, .upToDate:
         return DashboardTheme.green
-    case .needsAdmin, .needsRestart, .manualAction:
+    case .needsAdmin, .needsRestart, .manualAction, .adoptable:
         return DashboardTheme.orange
     case .failed:
         return DashboardTheme.red
@@ -8436,6 +9030,109 @@ private func versionTransition(_ entry: AppChangeLogEntry) -> String {
     }
     return entry.source.displayName
 }
+
+private func changeLogPreview(_ summary: String) -> String {
+    let lines = normalizedReleaseNoteStrings(summary)
+    let previewLines = lines.filter { line in
+        let lowercased = line.lowercased()
+        return !["all", "pro", "free"].contains(lowercased)
+    }
+    return Array(previewLines.prefix(4)).joined(separator: "  |  ")
+}
+
+private func releaseNoteLines(title: String, summary: String) -> [ReleaseNoteLine] {
+    let titleKey = normalizedReleaseNoteKey(title)
+    let strings = normalizedReleaseNoteStrings(summary)
+    var result: [ReleaseNoteLine] = []
+    var previousKind: ReleaseNoteLineKind?
+
+    for rawLine in strings {
+        let key = normalizedReleaseNoteKey(rawLine)
+        if key == titleKey, !result.isEmpty {
+            continue
+        }
+
+        let kind = releaseNoteLineKind(rawLine, previousKind: previousKind)
+        let text = kind == .bullet ? strippedBulletPrefix(rawLine) : rawLine
+        guard !text.isEmpty else { continue }
+        result.append(ReleaseNoteLine(id: result.count, kind: kind, text: text))
+        previousKind = kind
+    }
+
+    return result.isEmpty
+        ? [ReleaseNoteLine(id: 0, kind: .paragraph, text: summary.trimmingCharacters(in: .whitespacesAndNewlines))]
+        : result
+}
+
+private func normalizedReleaseNoteStrings(_ summary: String) -> [String] {
+    var seen: Set<String> = []
+    return summary
+        .components(separatedBy: .newlines)
+        .flatMap { line in
+            line
+                .replacingOccurrences(of: " • ", with: "\n")
+                .components(separatedBy: "\n")
+        }
+        .map { line in
+            line
+                .replacingOccurrences(of: "\t", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        .filter { !$0.isEmpty }
+        .filter { line in
+            let key = normalizedReleaseNoteKey(line)
+            guard !seen.contains(key) else { return false }
+            seen.insert(key)
+            return true
+        }
+}
+
+private func releaseNoteLineKind(_ line: String, previousKind: ReleaseNoteLineKind?) -> ReleaseNoteLineKind {
+    let lowercased = line.lowercased()
+    if hasBulletPrefix(line) || releaseNoteBulletVerbs.contains(where: { lowercased.hasPrefix($0) }) {
+        return .bullet
+    }
+    if line.count <= 54,
+       !line.hasSuffix("."),
+       !line.hasSuffix(","),
+       !line.hasSuffix(":") || previousKind != .paragraph {
+        return .heading
+    }
+    return .paragraph
+}
+
+private func hasBulletPrefix(_ line: String) -> Bool {
+    let prefixes = ["- ", "* ", "+ ", "• "]
+    return prefixes.contains { line.hasPrefix($0) }
+}
+
+private func strippedBulletPrefix(_ line: String) -> String {
+    for prefix in ["- ", "* ", "+ ", "• "] where line.hasPrefix(prefix) {
+        return String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    return line
+}
+
+private func normalizedReleaseNoteKey(_ value: String) -> String {
+    value
+        .lowercased()
+        .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "", options: .regularExpression)
+}
+
+private let releaseNoteBulletVerbs = [
+    "added",
+    "changed",
+    "deprecated",
+    "enabled",
+    "fixed",
+    "implemented",
+    "improved",
+    "optimized",
+    "reimplemented",
+    "removed",
+    "resolved",
+    "updated"
+]
 
 private func historyEntryID(_ entry: (Date, String, String)) -> String {
     "\(entry.0.timeIntervalSince1970)|\(entry.1)|\(entry.2)"

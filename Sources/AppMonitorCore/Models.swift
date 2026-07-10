@@ -1047,12 +1047,24 @@ public enum AppDateRangeFilter: String, Codable, CaseIterable, Identifiable {
     public var id: String { rawValue }
 }
 
+public enum AppUsageTimeFilter: String, Codable, CaseIterable, Identifiable {
+    case any = "Any Usage"
+    case none = "No Tracked Time"
+    case atLeast15Minutes = "15 min+"
+    case atLeast1Hour = "1 hr+"
+    case atLeast4Hours = "4 hr+"
+    case atLeast8Hours = "8 hr+"
+
+    public var id: String { rawValue }
+}
+
 public struct AppFilterState: Codable, Hashable {
     public var warningsOnly: Bool
     public var cleanupOnly: Bool
     public var hideProtectedApps: Bool
     public var category: StorageCategory?
     public var minimumStorageBytes: Int64
+    public var usageTime: AppUsageTimeFilter
     public var dateRange: AppDateRangeFilter
 
     public init(
@@ -1061,6 +1073,7 @@ public struct AppFilterState: Codable, Hashable {
         hideProtectedApps: Bool = false,
         category: StorageCategory? = nil,
         minimumStorageBytes: Int64 = 0,
+        usageTime: AppUsageTimeFilter = .any,
         dateRange: AppDateRangeFilter = .any
     ) {
         self.warningsOnly = warningsOnly
@@ -1068,6 +1081,7 @@ public struct AppFilterState: Codable, Hashable {
         self.hideProtectedApps = hideProtectedApps
         self.category = category
         self.minimumStorageBytes = minimumStorageBytes
+        self.usageTime = usageTime
         self.dateRange = dateRange
     }
 
@@ -1077,6 +1091,7 @@ public struct AppFilterState: Codable, Hashable {
         case hideProtectedApps
         case category
         case minimumStorageBytes
+        case usageTime
         case dateRange
     }
 
@@ -1087,6 +1102,7 @@ public struct AppFilterState: Codable, Hashable {
         hideProtectedApps = try container.decodeIfPresent(Bool.self, forKey: .hideProtectedApps) ?? false
         category = try container.decodeIfPresent(StorageCategory.self, forKey: .category)
         minimumStorageBytes = try container.decodeIfPresent(Int64.self, forKey: .minimumStorageBytes) ?? 0
+        usageTime = try container.decodeIfPresent(AppUsageTimeFilter.self, forKey: .usageTime) ?? .any
         dateRange = try container.decodeIfPresent(AppDateRangeFilter.self, forKey: .dateRange) ?? .any
     }
 }

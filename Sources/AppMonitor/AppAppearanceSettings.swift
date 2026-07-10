@@ -8,6 +8,14 @@ enum AppAppearancePreference: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var title: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+
     var settingsTitle: String {
         switch self {
         case .system: return "Use System"
