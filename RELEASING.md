@@ -19,7 +19,7 @@ Build and test the app:
 Build release artifacts locally:
 
 ```bash
-./scripts/package_release.sh 1.1.0 2
+./scripts/package_release.sh 1.2.0 3
 ```
 
 Inspect the generated metadata:
@@ -48,11 +48,11 @@ The DMG contains `App Monitor.app` plus an `/Applications` symlink for drag-and-
 
 App Monitor is a macOS GUI app, so Homebrew distribution should use a cask, not a formula. Start with a personal tap instead of the upstream Homebrew cask repository while the app is in beta.
 
-Use versioned beta release tags so Homebrew can upgrade predictably. For app version `1.1.0` and build `2`, use tag `v1.1.0-beta.2`:
+Use versioned beta release tags so Homebrew can upgrade predictably. For app version `1.2.0` and build `3`, use tag `v1.2.0-beta.3`:
 
 ```bash
-VERSION=1.1.0
-BUILD=2
+VERSION=1.2.0
+BUILD=3
 TAG="v${VERSION}-beta.${BUILD}"
 
 APP_MONITOR_TAG="$TAG" ./scripts/package_release.sh "$VERSION" "$BUILD"
@@ -137,7 +137,7 @@ Build, sign, notarize, and staple:
 ```bash
 APP_MONITOR_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
 APP_MONITOR_NOTARY_PROFILE="app-monitor-notary" \
-./scripts/package_release.sh 1.1.0 2
+./scripts/package_release.sh 1.2.0 3
 ```
 
 The script notarizes the zip, staples the app, recreates the zip, creates a DMG, notarizes the DMG, and staples the DMG.
@@ -167,14 +167,14 @@ After you make a change and commit it:
 
 ```bash
 git push origin main
-APP_MONITOR_TAG="v1.1.0-beta.2" ./scripts/package_release.sh 1.1.0 2
-gh release create v1.1.0-beta.2 \
+APP_MONITOR_TAG="v1.2.0-beta.3" ./scripts/package_release.sh 1.2.0 3
+gh release create v1.2.0-beta.3 \
   build/release/App-Monitor-Beta.zip \
   build/release/App-Monitor-Beta.dmg \
   build/release/appcast.xml \
   build/release/SHA256SUMS \
   --target main \
-  --title "App Monitor 1.1.0 beta 2" \
+  --title "App Monitor 1.2.0 beta 3" \
   --notes "App Monitor beta release."
 ```
 

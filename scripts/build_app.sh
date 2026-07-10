@@ -14,6 +14,7 @@ PRODUCT_DIR="$ROOT_DIR/build"
 APP_NAME="App Monitor"
 APP_DIR="$PRODUCT_DIR/$APP_NAME.app"
 BINARY_NAME="AppMonitor"
+ASKPASS_BINARY_NAME="AppMonitorAskpass"
 
 xml_escape() {
   local value="$1"
@@ -45,9 +46,16 @@ swift build -c "$CONFIGURATION"
 
 BUILD_BIN_DIR="$(swift build -c "$CONFIGURATION" --show-bin-path)"
 BUILT_BINARY="$BUILD_BIN_DIR/$BINARY_NAME"
+BUILT_ASKPASS_BINARY="$BUILD_BIN_DIR/$ASKPASS_BINARY_NAME"
+if [[ ! -x "$BUILT_ASKPASS_BINARY" ]]; then
+  echo "Missing secure Homebrew askpass helper at $BUILT_ASKPASS_BINARY" >&2
+  exit 1
+fi
 rm -rf "$APP_DIR"
-mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
+mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" "$APP_DIR/Contents/Helpers"
 cp "$BUILT_BINARY" "$APP_DIR/Contents/MacOS/$APP_NAME"
+cp "$BUILT_ASKPASS_BINARY" "$APP_DIR/Contents/Helpers/$ASKPASS_BINARY_NAME"
+chmod 755 "$APP_DIR/Contents/Helpers/$ASKPASS_BINARY_NAME"
 cp "$ROOT_DIR/Sources/AppMonitor/Resources/AppMonitorIcon.icns" "$APP_DIR/Contents/Resources/AppMonitorIcon.icns"
 cp "$ROOT_DIR/Sources/AppMonitor/Resources/AppMonitorAppIcon.png" "$APP_DIR/Contents/Resources/AppMonitorAppIcon.png"
 cp "$ROOT_DIR/Sources/AppMonitor/Resources/AppMonitorLogo.png" "$APP_DIR/Contents/Resources/AppMonitorLogo.png"
