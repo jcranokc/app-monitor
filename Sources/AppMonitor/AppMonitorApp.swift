@@ -13,6 +13,7 @@ struct AppMonitorApp: App {
         WindowGroup("App Monitor", id: appMonitorDashboardWindowID) {
             DashboardView()
                 .environmentObject(model)
+                .preferredColorScheme(model.appearancePreference.colorScheme)
                 .background(
                     MenuBarInstaller()
                         .environmentObject(model)
@@ -21,6 +22,9 @@ struct AppMonitorApp: App {
                 .frame(minWidth: 1180, minHeight: 720)
                 .task {
                     await model.bootstrap()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    model.reconcileInstalledAppUpdates()
                 }
         }
         .windowStyle(.hiddenTitleBar)
@@ -36,8 +40,8 @@ struct AppMonitorApp: App {
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
 
-                Button("Check for Updates") {
-                    Task { await model.checkForUpdates() }
+                Button("Check for App Monitor Updates") {
+                    Task { await model.checkForAppMonitorUpdate() }
                 }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
 
@@ -52,6 +56,7 @@ struct AppMonitorApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppAppearanceSettings.applyCurrentPreference()
         NSApp.setActivationPolicy(.regular)
         NSApp.applicationIconImage = AppBranding.appIconImage()
     }

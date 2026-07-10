@@ -44,6 +44,7 @@ public enum AppUpdateStatus: String, Codable, CaseIterable, Identifiable, Sendab
     case needsAdmin
     case needsRestart
     case manualAction
+    case adoptable
     case providerUnavailable
     case skipped
 
@@ -69,6 +70,8 @@ public enum AppUpdateStatus: String, Codable, CaseIterable, Identifiable, Sendab
             return "Needs Restart"
         case .manualAction:
             return "Manual Action"
+        case .adoptable:
+            return "Adoptable"
         case .providerUnavailable:
             return "Provider Missing"
         case .skipped:
@@ -78,7 +81,7 @@ public enum AppUpdateStatus: String, Codable, CaseIterable, Identifiable, Sendab
 
     public var countsAsAvailable: Bool {
         switch self {
-        case .available, .needsAdmin, .needsRestart, .manualAction:
+        case .available, .needsAdmin, .needsRestart, .manualAction, .adoptable:
             return true
         case .upToDate, .checking, .updating, .updated, .failed, .providerUnavailable, .skipped:
             return false
@@ -319,11 +322,22 @@ public struct AppChangeLogEntry: Identifiable, Hashable, Codable, Sendable {
             toVersion: toVersion,
             title: title,
             summary: summary,
-            releaseNotesURL: record.releaseNotesURL ?? record.installActionURL,
+            releaseNotesURL: record.releaseNotesURL ?? releaseNotesCandidateURL(record.installActionURL),
             updateRunID: runID ?? result?.runID,
             updateResultID: result?.id,
             capturedAt: capturedAt
         )
+    }
+
+    private static func releaseNotesCandidateURL(_ urlString: String?) -> String? {
+        guard let urlString,
+              let url = URL(string: urlString),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return nil
+        }
+        let archiveExtensions: Set<String> = ["dmg", "pkg", "zip", "tbz", "tgz", "gz", "bz2", "xz"]
+        return archiveExtensions.contains(url.pathExtension.lowercased()) ? nil : urlString
     }
 }
 
@@ -402,6 +416,54 @@ public struct UpdateItemResult: Identifiable, Hashable, Codable, Sendable {
 }
 
 public struct AppUpdateEligibility {
+    public static func isResolvedByInstalledVersion(
+        _ record: AppUpdateRecord,
+        installedVersion: String?
+    ) -> Bool {
+        switch record.source {
+        case .macAppStore, .directDownload, .metadata, .electron:
+            break
+        case .homebrewCask, .homebrewFormula, .appleSoftwareUpdate, .unknown:
+            return false
+        }
+        guard let installedVersion,
+              !installedVersion.isEmpty,
+              let availableVersion = record.availableVersion,
+              !availableVersion.isEmpty else {
+            return false
+        }
+        return VersionComparator.isVersion(installedVersion, atLeast: availableVersion)
+    }
+
+    public static func isStaleHomebrewManagementRecord(_ record: AppUpdateRecord) -> Bool {
+        guard record.source == .homebrewCask,
+              record.sourceIdentifier.hasPrefix("adopt:") || record.sourceIdentifier.hasPrefix("replace:"),
+              let currentVersion = record.currentVersion,
+              let availableVersion = record.availableVersion else {
+            return false
+        }
+        return VersionComparator.isVersion(currentVersion, newerThan: availableVersion)
+    }
+
+    public static func isBulkHomebrewActionable(
+        record: AppUpdateRecord,
+        settings: AppUpdateSettings
+    ) -> Bool {
+        guard record.canInstall else { return false }
+        guard record.status == .available || record.status == .adoptable else { return false }
+        guard !record.requiresAdmin, !record.requiresRestart else { return false }
+        guard !isStaleHomebrewManagementRecord(record) else { return false }
+
+        switch record.source {
+        case .homebrewCask:
+            return true
+        case .homebrewFormula:
+            return record.status == .available && settings.includeHomebrewFormulae
+        case .macAppStore, .appleSoftwareUpdate, .directDownload, .metadata, .electron, .unknown:
+            return false
+        }
+    }
+
     public static func isAutoEligible(
         record: AppUpdateRecord,
         isAppRunning: Bool,

@@ -435,7 +435,13 @@ final class AppMonitorCoreTests: XCTestCase {
         let store = try temporaryStore()
         let filter = SavedAppFilter(
             name: "Warnings",
-            state: AppFilterState(warningsOnly: true, hideProtectedApps: true, category: .caches, minimumStorageBytes: 100)
+            state: AppFilterState(
+                warningsOnly: true,
+                hideProtectedApps: true,
+                category: .caches,
+                minimumStorageBytes: 100,
+                usageTime: .atLeast1Hour
+            )
         )
         let schedule = AppScanSchedule(isEnabled: true, intervalHours: 12, nextScanAt: Date(timeIntervalSince1970: 1_800_000_000))
 
@@ -461,6 +467,7 @@ final class AppMonitorCoreTests: XCTestCase {
         XCTAssertTrue(filter.warningsOnly)
         XCTAssertFalse(filter.hideProtectedApps)
         XCTAssertEqual(filter.minimumStorageBytes, 100)
+        XCTAssertEqual(filter.usageTime, .any)
     }
 
     func testStorageScannerBuildsLargeFileIndex() throws {
@@ -807,7 +814,7 @@ final class AppMonitorCoreTests: XCTestCase {
               <title>Version 2.0</title>
               <description>Added faster scans and fixed crashes.</description>
               <sparkle:releaseNotesLink>https://example.com/releases/2.0</sparkle:releaseNotesLink>
-              <enclosure url="https://example.com/Sample.zip" sparkle:shortVersionString="2.0" sparkle:version="200" />
+              <enclosure url="https://example.com/Sample.zip" sparkle:shortVersionString="2.0" sparkle:version="200" sparkle:sha256="abcdef" />
             </item>
           </channel>
         </rss>
@@ -820,6 +827,40 @@ final class AppMonitorCoreTests: XCTestCase {
         XCTAssertEqual(item.url?.absoluteString, "https://example.com/Sample.zip")
         XCTAssertEqual(item.summary, "Added faster scans and fixed crashes.")
         XCTAssertEqual(item.releaseNotesURL?.absoluteString, "https://example.com/releases/2.0")
+        XCTAssertEqual(item.sha256, "abcdef")
+    }
+
+    func testSparkleAppcastParserIgnoresDeltaEnclosures() throws {
+        let xml = """
+        <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+          <channel>
+            <item>
+              <title>0.8.0</title>
+              <sparkle:shortVersionString>0.8.0</sparkle:shortVersionString>
+              <enclosure url="https://getdocky.com/releases/Docky-0.8.0.zip" />
+              <sparkle:deltas>
+                <enclosure url="https://getdocky.com/releases/Docky-0.8.0-from-0.6.2.delta" sparkle:deltaFrom="202606111009" />
+              </sparkle:deltas>
+            </item>
+          </channel>
+        </rss>
+        """
+
+        let item = try SparkleAppcastParser.latestItem(from: Data(xml.utf8))
+
+        XCTAssertEqual(item.version, "0.8.0")
+        XCTAssertEqual(item.url?.absoluteString, "https://getdocky.com/releases/Docky-0.8.0.zip")
+    }
+
+    func testGuidedUpdateURLPolicyRejectsUpdaterPayloads() {
+        XCTAssertNil(GuidedUpdateURLPolicy.userFacingURL(from: "https://example.com/App.delta"))
+        XCTAssertNil(GuidedUpdateURLPolicy.userFacingURL(from: "https://example.com/App.zip"))
+        XCTAssertNil(GuidedUpdateURLPolicy.userFacingURL(from: "https://example.com/appcast.xml"))
+        XCTAssertNil(GuidedUpdateURLPolicy.userFacingURL(from: "file:///tmp/App.dmg"))
+        XCTAssertEqual(
+            GuidedUpdateURLPolicy.userFacingURL(from: "https://example.com/releases/2.0")?.absoluteString,
+            "https://example.com/releases/2.0"
+        )
     }
 
     func testSparkleAppcastParserReadsChildVersionElements() throws {
@@ -842,49 +883,485 @@ final class AppMonitorCoreTests: XCTestCase {
         XCTAssertEqual(item.url?.absoluteString, "https://example.com/CodexBar.zip")
     }
 
+    func testDirectDownloadProviderSkipsHomebrewManagedSparkleApps() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AppMonitorTests-\(UUID().uuidString)", isDirectory: true)
+        let appURL = rootURL.appendingPathComponent("AlDente.app", isDirectory: true)
+        let contentsURL = appURL.appendingPathComponent("Contents", isDirectory: true)
+        let caskroomURL = rootURL.appendingPathComponent("Caskroom", isDirectory: true)
+        try FileManager.default.createDirectory(at: contentsURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: caskroomURL.appendingPathComponent("aldente", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        NSDictionary(dictionary: [
+            "SUFeedURL": "https://example.invalid/aldente-appcast.xml"
+        ]).write(to: contentsURL.appendingPathComponent("Info.plist"), atomically: true)
+
+        let app = sampleApp(
+            name: "AlDente",
+            bundleID: "com.apphousekitchen.aldente-pro",
+            version: "1.38",
+            path: appURL.path
+        )
+        let provider = DirectDownloadUpdateProvider(
+            timeout: 0.01,
+            homebrewCaskRoots: [caskroomURL.path]
+        )
+
+        let records = await provider.checkUpdates(apps: [app])
+
+        XCTAssertTrue(records.isEmpty)
+    }
+
     func testMetadataProviderMatchesHomebrewCaskMetadataForNonBrewApps() {
         let app = sampleApp(
-            name: "AltTab",
-            bundleID: "com.lwouis.alt-tab-macos",
-            path: "/Applications/AltTab.app"
+            name: "Codex Test Replacer",
+            bundleID: "com.example.codex-test-replacer",
+            path: "/Applications/Codex Test Replacer.app"
         )
         let json = """
         [
           {
-            "token": "alt-tab",
-            "name": ["AltTab"],
+            "token": "codex-test-replacer",
+            "name": ["Codex Test Replacer"],
             "version": "11.4.3",
-            "url": "https://github.com/lwouis/alt-tab-macos/releases/download/v11.4.3/AltTab-11.4.3.zip",
-            "homepage": "https://alt-tab.app/",
-            "desc": "Window switcher"
+            "url": "https://example.com/CodexTestReplacer-11.4.3.zip",
+            "homepage": "https://example.com/",
+            "desc": "Test update utility"
           }
         ]
         """
 
         let records = MetadataUpdateProvider.parseCaskMetadata(json: Data(json.utf8), apps: [app], checkedAt: Date(timeIntervalSince1970: 2_450))
 
-        XCTAssertEqual(records.count, 1)
-        XCTAssertEqual(records[0].appID, app.id)
-        XCTAssertEqual(records[0].source, .metadata)
-        XCTAssertEqual(records[0].sourceIdentifier, "homebrew-cask:alt-tab")
-        XCTAssertEqual(records[0].currentVersion, "1.0")
-        XCTAssertEqual(records[0].availableVersion, "11.4.3")
-        XCTAssertEqual(records[0].status, .manualAction)
-        XCTAssertFalse(records[0].canInstall)
+        XCTAssertEqual(records.count, 2)
+        let homebrewRecord = records.first { $0.source == .homebrewCask }
+        XCTAssertEqual(homebrewRecord?.appID, app.id)
+        XCTAssertEqual(homebrewRecord?.sourceIdentifier, "replace:codex-test-replacer")
+        XCTAssertEqual(homebrewRecord?.currentVersion, "1.0")
+        XCTAssertEqual(homebrewRecord?.availableVersion, "11.4.3")
+        XCTAssertEqual(homebrewRecord?.status, .adoptable)
+        XCTAssertEqual(homebrewRecord?.installActionTitle, "Adopt with Homebrew")
+        XCTAssertFalse(homebrewRecord?.isAutoEligible ?? true)
+
+        let metadataRecord = records.first { $0.source == .metadata }
+        XCTAssertEqual(metadataRecord?.appID, app.id)
+        XCTAssertEqual(metadataRecord?.sourceIdentifier, "homebrew-cask:codex-test-replacer")
+        XCTAssertEqual(metadataRecord?.currentVersion, "1.0")
+        XCTAssertEqual(metadataRecord?.availableVersion, "11.4.3")
+        XCTAssertEqual(metadataRecord?.status, .manualAction)
+        XCTAssertTrue(metadataRecord?.canInstall ?? false)
     }
 
-    func testMetadataProviderDisplaysPrimaryCaskVersion() {
+    func testMetadataProviderMarksHomebrewCaskAdoptableWithoutNewerVersion() {
         let app = sampleApp(
-            name: "Claude",
-            bundleID: "com.anthropic.claudefordesktop",
-            version: "1.15962.1",
-            path: "/Applications/Claude.app"
+            name: "Codex Test Adoptable",
+            bundleID: "com.example.codex-test-adoptable",
+            version: "1.0",
+            path: "/Applications/Codex Test Adoptable.app"
         )
         let json = """
         [
           {
-            "token": "claude",
-            "name": ["Claude"],
+            "token": "codex-test-adoptable",
+            "name": ["Codex Test Adoptable"],
+            "version": "1.0",
+            "homepage": "https://example.com/"
+          }
+        ]
+        """
+
+        let records = MetadataUpdateProvider.parseCaskMetadata(json: Data(json.utf8), apps: [app])
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].status, .adoptable)
+        XCTAssertEqual(records[0].source, .homebrewCask)
+        XCTAssertEqual(records[0].sourceIdentifier, "adopt:codex-test-adoptable")
+        XCTAssertEqual(records[0].availableVersion, "1.0")
+    }
+
+    func testMetadataProviderSkipsHomebrewAdoptionWhenInstalledVersionIsNewer() {
+        let app = sampleApp(
+            name: "OneDrive",
+            bundleID: "com.microsoft.OneDrive",
+            version: "26.108.0607",
+            path: "/Applications/OneDrive.app"
+        )
+        let json = """
+        [
+          {
+            "token": "onedrive",
+            "name": ["OneDrive"],
+            "version": "26.106.0603.0003",
+            "homepage": "https://www.microsoft.com/microsoft-365/onedrive/online-cloud-storage"
+          }
+        ]
+        """
+
+        let records = MetadataUpdateProvider.parseCaskMetadata(json: Data(json.utf8), apps: [app])
+
+        XCTAssertTrue(records.isEmpty)
+
+        let staleRecord = AppUpdateRecord(
+            appID: app.id,
+            appName: app.name,
+            bundleIdentifier: app.bundleIdentifier,
+            appPath: app.path,
+            source: .homebrewCask,
+            sourceIdentifier: "adopt:onedrive",
+            currentVersion: app.version,
+            availableVersion: "26.106.0603.0003",
+            status: .adoptable,
+            installActionTitle: "Adopt with Homebrew",
+            canInstall: true,
+            isAutoEligible: false
+        )
+        XCTAssertTrue(AppUpdateEligibility.isStaleHomebrewManagementRecord(staleRecord))
+        XCTAssertFalse(
+            AppUpdateEligibility.isBulkHomebrewActionable(
+                record: staleRecord,
+                settings: AppUpdateSettings(includeHomebrewFormulae: true)
+            )
+        )
+    }
+
+    func testMetadataProviderStillMarksSparkleAppsAdoptableWhenCaskIsNotNewer() throws {
+        let appURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AppMonitorTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("Codex Test Sparkle Adopt.app", isDirectory: true)
+        let contentsURL = appURL.appendingPathComponent("Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: contentsURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: appURL.deletingLastPathComponent()) }
+
+        let infoURL = contentsURL.appendingPathComponent("Info.plist")
+        NSDictionary(dictionary: [
+            "SUFeedURL": "https://apphousekitchen.com/aldente/aldenteproappcast.xml"
+        ]).write(to: infoURL, atomically: true)
+
+        let app = sampleApp(
+            name: "Codex Test Sparkle Adopt",
+            bundleID: "com.example.codex-test-sparkle-adopt",
+            version: "1.38",
+            path: appURL.path
+        )
+        let json = """
+        [
+          {
+            "token": "codex-test-sparkle-adopt",
+            "name": ["Codex Test Sparkle Adopt"],
+            "version": "1.38",
+            "homepage": "https://apphousekitchen.com/"
+          }
+        ]
+        """
+
+        let records = MetadataUpdateProvider.parseCaskMetadata(json: Data(json.utf8), apps: [app])
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].status, .adoptable)
+        XCTAssertEqual(records[0].source, .homebrewCask)
+        XCTAssertEqual(records[0].sourceIdentifier, "adopt:codex-test-sparkle-adopt")
+    }
+
+    func testMetadataProviderMarksNewerSparkleCasksAdoptableWithReplaceCommand() throws {
+        let appURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AppMonitorTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("Codex Test Sparkle Replace.app", isDirectory: true)
+        let contentsURL = appURL.appendingPathComponent("Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: contentsURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: appURL.deletingLastPathComponent()) }
+
+        let infoURL = contentsURL.appendingPathComponent("Info.plist")
+        NSDictionary(dictionary: [
+            "SUFeedURL": "https://apphousekitchen.com/aldente/aldenteproappcast.xml"
+        ]).write(to: infoURL, atomically: true)
+
+        let app = sampleApp(
+            name: "Codex Test Sparkle Replace",
+            bundleID: "com.example.codex-test-sparkle-replace",
+            version: "1.38",
+            path: appURL.path
+        )
+        let json = """
+        [
+          {
+            "token": "codex-test-sparkle-replace",
+            "name": ["Codex Test Sparkle Replace"],
+            "version": "1.39",
+            "homepage": "https://apphousekitchen.com/"
+          }
+        ]
+        """
+
+        let records = MetadataUpdateProvider.parseCaskMetadata(json: Data(json.utf8), apps: [app])
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].status, .adoptable)
+        XCTAssertEqual(records[0].source, .homebrewCask)
+        XCTAssertEqual(records[0].sourceIdentifier, "replace:codex-test-sparkle-replace")
+        XCTAssertEqual(records[0].installActionTitle, "Adopt with Homebrew")
+    }
+
+    func testHomebrewProviderAdoptsCaskWithInstallAdoptCommand() async {
+        let runner = RecordingUpdateCommandRunner(results: [
+            ShellCommandResult(exitCode: 0, output: ""),
+            ShellCommandResult(exitCode: 0, output: "sample-app adopted")
+        ])
+        let provider = HomebrewUpdateProvider(
+            brewPath: "/opt/homebrew/bin/brew",
+            includeFormulae: true,
+            commandRunner: runner,
+            askpassHelperURL: URL(fileURLWithPath: "/tmp/AppMonitorAskpass-Test")
+        )
+        let record = AppUpdateRecord(
+            appID: "app",
+            appName: "Sample App",
+            bundleIdentifier: "com.example.sample",
+            appPath: "/Applications/Sample App.app",
+            source: .homebrewCask,
+            sourceIdentifier: "adopt:sample-app",
+            currentVersion: "1.0",
+            availableVersion: "1.0",
+            status: .adoptable,
+            installActionTitle: "Adopt with Homebrew",
+            canInstall: true,
+            isAutoEligible: false
+        )
+
+        let result = await provider.performUpdate(record: record, mode: .manual, runID: "run")
+
+        XCTAssertEqual(result.status, .updated)
+        XCTAssertEqual(result.message, "sample-app adopted")
+        XCTAssertEqual(runner.calls.map(\.arguments), [
+            ["update", "--auto-update"],
+            ["install", "--cask", "--adopt", "sample-app"]
+        ])
+        XCTAssertNil(runner.calls[0].environment["SUDO_ASKPASS"])
+        XCTAssertEqual(runner.calls[1].environment["SUDO_ASKPASS"], "/tmp/AppMonitorAskpass-Test")
+        XCTAssertNotNil(runner.calls[1].environment["APP_MONITOR_ASKPASS_ATTEMPT_ID"])
+        XCTAssertEqual(
+            runner.calls[1].environment["APP_MONITOR_ASKPASS_CONTEXT"],
+            "adopt Sample App as the sample-app Homebrew cask"
+        )
+        XCTAssertFalse(runner.calls[1].environment.keys.contains { $0.localizedCaseInsensitiveContains("password") })
+    }
+
+    func testHomebrewProviderReplacesCaskWithForceInstallCommand() async {
+        let runner = RecordingUpdateCommandRunner(results: [
+            ShellCommandResult(exitCode: 0, output: ""),
+            ShellCommandResult(exitCode: 0, output: "codexbar installed")
+        ])
+        let provider = HomebrewUpdateProvider(
+            brewPath: "/opt/homebrew/bin/brew",
+            includeFormulae: true,
+            commandRunner: runner,
+            askpassHelperURL: URL(fileURLWithPath: "/tmp/AppMonitorAskpass-Test")
+        )
+        let record = AppUpdateRecord(
+            appID: "app",
+            appName: "CodexBar",
+            bundleIdentifier: "com.steipete.CodexBar",
+            appPath: "/Applications/CodexBar.app",
+            source: .homebrewCask,
+            sourceIdentifier: "replace:codexbar",
+            currentVersion: "0.37.2",
+            availableVersion: "0.41.0",
+            status: .adoptable,
+            installActionTitle: "Adopt with Homebrew",
+            canInstall: true,
+            isAutoEligible: false
+        )
+
+        let result = await provider.performUpdate(record: record, mode: .manual, runID: "run")
+
+        XCTAssertEqual(result.status, .updated)
+        XCTAssertEqual(result.message, "codexbar installed")
+        XCTAssertEqual(runner.calls.map(\.arguments), [
+            ["update", "--auto-update"],
+            ["install", "--cask", "--force", "codexbar"]
+        ])
+        XCTAssertNil(runner.calls[0].environment["SUDO_ASKPASS"])
+        XCTAssertEqual(runner.calls[1].environment["SUDO_ASKPASS"], "/tmp/AppMonitorAskpass-Test")
+        XCTAssertNotNil(runner.calls[1].environment["APP_MONITOR_ASKPASS_ATTEMPT_ID"])
+        XCTAssertEqual(
+            runner.calls[1].environment["APP_MONITOR_ASKPASS_CONTEXT"],
+            "update CodexBar with the codexbar Homebrew cask"
+        )
+        XCTAssertFalse(runner.calls[1].environment.keys.contains { $0.localizedCaseInsensitiveContains("password") })
+    }
+
+    func testHomebrewProviderUsesSecureAskpassHelperForManagedUpdates() async {
+        let runner = RecordingUpdateCommandRunner(results: [
+            ShellCommandResult(exitCode: 0, output: ""),
+            ShellCommandResult(exitCode: 0, output: "sample-app upgraded")
+        ])
+        let provider = HomebrewUpdateProvider(
+            brewPath: "/opt/homebrew/bin/brew",
+            includeFormulae: true,
+            commandRunner: runner,
+            askpassHelperURL: URL(fileURLWithPath: "/tmp/AppMonitorAskpass-Test")
+        )
+        let record = AppUpdateRecord(
+            appID: "app",
+            appName: "Sample App",
+            bundleIdentifier: "com.example.sample",
+            appPath: "/Applications/Sample App.app",
+            source: .homebrewCask,
+            sourceIdentifier: "sample-app",
+            currentVersion: "1.0",
+            availableVersion: "2.0",
+            status: .available,
+            installActionTitle: "Update with Homebrew",
+            canInstall: true,
+            isAutoEligible: true
+        )
+
+        let result = await provider.performUpdate(record: record, mode: .manual, runID: "run")
+
+        XCTAssertEqual(result.status, .updated)
+        XCTAssertEqual(runner.calls.map(\.arguments), [
+            ["update", "--auto-update"],
+            ["upgrade", "--cask", "sample-app", "--no-ask", "--greedy"]
+        ])
+        XCTAssertEqual(runner.calls[1].environment["SUDO_ASKPASS"], "/tmp/AppMonitorAskpass-Test")
+        XCTAssertNotNil(runner.calls[1].environment["APP_MONITOR_ASKPASS_ATTEMPT_ID"])
+        XCTAssertEqual(
+            runner.calls[1].environment["APP_MONITOR_ASKPASS_CONTEXT"],
+            "update Sample App with Homebrew"
+        )
+        XCTAssertFalse(runner.calls[1].environment.keys.contains { $0.localizedCaseInsensitiveContains("password") })
+    }
+
+    func testHomebrewProviderDoesNotUseGreedyForFormulaUpdates() async {
+        let runner = RecordingUpdateCommandRunner(results: [
+            ShellCommandResult(exitCode: 0, output: ""),
+            ShellCommandResult(exitCode: 0, output: "sdl3 upgraded")
+        ])
+        let provider = HomebrewUpdateProvider(
+            brewPath: "/opt/homebrew/bin/brew",
+            includeFormulae: true,
+            commandRunner: runner,
+            askpassHelperURL: URL(fileURLWithPath: "/tmp/AppMonitorAskpass-Test")
+        )
+        let record = AppUpdateRecord(
+            appID: nil,
+            appName: "sdl3",
+            bundleIdentifier: nil,
+            appPath: nil,
+            source: .homebrewFormula,
+            sourceIdentifier: "sdl3",
+            currentVersion: "3.4.10",
+            availableVersion: "3.4.12",
+            status: .available,
+            installActionTitle: "Update with Homebrew",
+            canInstall: true,
+            isAutoEligible: true
+        )
+
+        let result = await provider.performUpdate(record: record, mode: .manual, runID: "run")
+
+        XCTAssertEqual(result.status, .updated)
+        XCTAssertEqual(runner.calls.map(\.arguments), [
+            ["update", "--auto-update"],
+            ["upgrade", "--formula", "sdl3", "--no-ask"]
+        ])
+        XCTAssertEqual(runner.calls[1].environment["SUDO_ASKPASS"], "/tmp/AppMonitorAskpass-Test")
+    }
+
+    func testHomebrewProviderCondensesUsageFailuresToTheErrorLine() async {
+        let runner = RecordingUpdateCommandRunner(results: [
+            ShellCommandResult(exitCode: 0, output: ""),
+            ShellCommandResult(
+                exitCode: 1,
+                output: "Usage: brew upgrade [options]\nA very long help page.\nError: Formula update failed."
+            )
+        ])
+        let provider = HomebrewUpdateProvider(
+            brewPath: "/opt/homebrew/bin/brew",
+            includeFormulae: true,
+            commandRunner: runner,
+            askpassHelperURL: URL(fileURLWithPath: "/tmp/AppMonitorAskpass-Test")
+        )
+        let record = AppUpdateRecord(
+            appID: nil,
+            appName: "sdl3",
+            bundleIdentifier: nil,
+            appPath: nil,
+            source: .homebrewFormula,
+            sourceIdentifier: "sdl3",
+            currentVersion: "3.4.10",
+            availableVersion: "3.4.12",
+            status: .available,
+            installActionTitle: "Update with Homebrew",
+            canInstall: true,
+            isAutoEligible: true
+        )
+
+        let result = await provider.performUpdate(record: record, mode: .manual, runID: "run")
+
+        XCTAssertEqual(result.status, .failed)
+        XCTAssertEqual(result.message, "Error: Formula update failed.")
+    }
+
+    func testHomebrewProviderRepairsMissingCaskArtifactWithReinstall() async {
+        let missingArtifactOutput = "Error: cursor: It seems the App source '/Applications/Cursor.app' is not there."
+        let runner = RecordingUpdateCommandRunner(results: [
+            ShellCommandResult(exitCode: 0, output: ""),
+            ShellCommandResult(exitCode: 1, output: missingArtifactOutput),
+            ShellCommandResult(exitCode: 0, output: "cursor reinstalled")
+        ])
+        let provider = HomebrewUpdateProvider(
+            brewPath: "/opt/homebrew/bin/brew",
+            includeFormulae: true,
+            commandRunner: runner,
+            askpassHelperURL: URL(fileURLWithPath: "/tmp/AppMonitorAskpass-Test")
+        )
+        let record = AppUpdateRecord(
+            appID: "cursor",
+            appName: "Cursor",
+            bundleIdentifier: "com.todesktop.230313mzl4w4u92",
+            appPath: "/Applications/Cursor.app",
+            source: .homebrewCask,
+            sourceIdentifier: "cursor",
+            currentVersion: "3.8.24,cf80f4b937f3b9c48070d7085129a838ce7876a3",
+            availableVersion: "3.10.20,23b9fb205fe595ea2be29da7214e19762d037fc3",
+            status: .available,
+            installActionTitle: "Update with Homebrew",
+            canInstall: true,
+            isAutoEligible: true
+        )
+
+        let result = await provider.performUpdate(record: record, mode: .manual, runID: "run")
+
+        XCTAssertEqual(result.status, .updated)
+        XCTAssertTrue(result.message?.contains("Repaired the missing app artifact") == true)
+        XCTAssertEqual(runner.calls.map(\.arguments), [
+            ["update", "--auto-update"],
+            ["upgrade", "--cask", "cursor", "--no-ask", "--greedy"],
+            ["reinstall", "--cask", "--force", "cursor"]
+        ])
+        XCTAssertEqual(runner.calls[2].environment["SUDO_ASKPASS"], "/tmp/AppMonitorAskpass-Test")
+        XCTAssertNotEqual(
+            runner.calls[1].environment["APP_MONITOR_ASKPASS_ATTEMPT_ID"],
+            runner.calls[2].environment["APP_MONITOR_ASKPASS_ATTEMPT_ID"]
+        )
+    }
+
+    func testMetadataProviderDisplaysPrimaryCaskVersion() {
+        let app = sampleApp(
+            name: "Codex Test Primary Cask",
+            bundleID: "com.example.codex-test-primary-cask",
+            version: "1.15962.1",
+            path: "/Applications/Codex Test Primary Cask.app"
+        )
+        let json = """
+        [
+          {
+            "token": "codex-test-primary-cask",
+            "name": ["Codex Test Primary Cask"],
             "version": "1.19367.0,1a5be1fbf83d1832486e03a667557c18f0a0ec7a",
             "homepage": "https://claude.ai/download"
           }
@@ -893,8 +1370,13 @@ final class AppMonitorCoreTests: XCTestCase {
 
         let records = MetadataUpdateProvider.parseCaskMetadata(json: Data(json.utf8), apps: [app])
 
-        XCTAssertEqual(records.count, 1)
-        XCTAssertEqual(records[0].availableVersion, "1.19367.0")
+        XCTAssertEqual(records.count, 2)
+        XCTAssertEqual(records.first { $0.source == .metadata }?.availableVersion, "1.19367.0")
+        let homebrewRecord = records.first { $0.source == .homebrewCask }
+        XCTAssertEqual(homebrewRecord?.availableVersion, "1.19367.0")
+        XCTAssertEqual(homebrewRecord?.sourceIdentifier, "replace:codex-test-primary-cask")
+        XCTAssertEqual(homebrewRecord?.status, .adoptable)
+        XCTAssertEqual(homebrewRecord?.installActionTitle, "Adopt with Homebrew")
     }
 
     func testElectronLatestYAMLParserPrefersMacARMDownload() throws {
@@ -1015,6 +1497,166 @@ final class AppMonitorCoreTests: XCTestCase {
             isAutoEligible: false
         )
         XCTAssertFalse(AppUpdateEligibility.isAutoEligible(record: direct, isAppRunning: false, settings: settings))
+    }
+
+    func testBulkHomebrewEligibilityIncludesAdoptionsAndManagedUpdates() {
+        let settings = AppUpdateSettings(
+            automaticUpdatesEnabled: false,
+            includeHomebrewFormulae: true
+        )
+        let adoptable = AppUpdateRecord(
+            appID: "adoptable",
+            appName: "Adoptable App",
+            bundleIdentifier: "com.example.adoptable",
+            appPath: "/Applications/Adoptable App.app",
+            source: .homebrewCask,
+            sourceIdentifier: "adopt:adoptable-app",
+            currentVersion: "1.0",
+            availableVersion: "1.0",
+            status: .adoptable,
+            installActionTitle: "Adopt with Homebrew",
+            canInstall: true,
+            isAutoEligible: false
+        )
+        let caskUpdate = AppUpdateRecord(
+            appID: "cask",
+            appName: "Managed App",
+            bundleIdentifier: "com.example.managed",
+            appPath: "/Applications/Managed App.app",
+            source: .homebrewCask,
+            sourceIdentifier: "managed-app",
+            currentVersion: "1.0",
+            availableVersion: "2.0",
+            status: .available,
+            installActionTitle: "Update with Homebrew",
+            canInstall: true,
+            isAutoEligible: true
+        )
+        let formulaUpdate = AppUpdateRecord(
+            appID: nil,
+            appName: "managed-formula",
+            bundleIdentifier: nil,
+            appPath: nil,
+            source: .homebrewFormula,
+            sourceIdentifier: "managed-formula",
+            currentVersion: "1.0",
+            availableVersion: "2.0",
+            status: .available,
+            installActionTitle: "Update with Homebrew",
+            canInstall: true,
+            isAutoEligible: true
+        )
+
+        XCTAssertTrue(AppUpdateEligibility.isBulkHomebrewActionable(record: adoptable, settings: settings))
+        XCTAssertTrue(AppUpdateEligibility.isBulkHomebrewActionable(record: caskUpdate, settings: settings))
+        XCTAssertTrue(AppUpdateEligibility.isBulkHomebrewActionable(record: formulaUpdate, settings: settings))
+    }
+
+    func testBulkHomebrewEligibilityExcludesManualAndDisabledRecords() {
+        let settings = AppUpdateSettings(
+            automaticUpdatesEnabled: false,
+            includeHomebrewFormulae: false
+        )
+        let formulaUpdate = AppUpdateRecord(
+            appID: nil,
+            appName: "managed-formula",
+            bundleIdentifier: nil,
+            appPath: nil,
+            source: .homebrewFormula,
+            sourceIdentifier: "managed-formula",
+            currentVersion: "1.0",
+            availableVersion: "2.0",
+            status: .available,
+            installActionTitle: "Update with Homebrew",
+            canInstall: true,
+            isAutoEligible: true
+        )
+        let directUpdate = AppUpdateRecord(
+            appID: "direct",
+            appName: "Direct App",
+            bundleIdentifier: "com.example.direct",
+            appPath: "/Applications/Direct App.app",
+            source: .directDownload,
+            sourceIdentifier: "https://example.com/appcast.xml",
+            currentVersion: "1.0",
+            availableVersion: "2.0",
+            status: .manualAction,
+            installActionTitle: "Open Updater",
+            canInstall: true,
+            isAutoEligible: false
+        )
+        let failedAdoption = AppUpdateRecord(
+            appID: "failed",
+            appName: "Failed App",
+            bundleIdentifier: "com.example.failed",
+            appPath: "/Applications/Failed App.app",
+            source: .homebrewCask,
+            sourceIdentifier: "adopt:failed-app",
+            currentVersion: "1.0",
+            availableVersion: "1.0",
+            status: .failed,
+            installActionTitle: "Adopt with Homebrew",
+            canInstall: true,
+            isAutoEligible: false
+        )
+
+        XCTAssertFalse(AppUpdateEligibility.isBulkHomebrewActionable(record: formulaUpdate, settings: settings))
+        XCTAssertFalse(AppUpdateEligibility.isBulkHomebrewActionable(record: directUpdate, settings: settings))
+        XCTAssertFalse(AppUpdateEligibility.isBulkHomebrewActionable(record: failedAdoption, settings: settings))
+    }
+
+    func testMacAppStoreUpdateIsResolvedWhenInstalledVersionCatchesUp() {
+        let record = AppUpdateRecord(
+            appID: "app-store-app",
+            appName: "Did I Copy It?",
+            bundleIdentifier: "com.underratedsoftware.didicopyit",
+            appPath: "/Applications/Did I Copy It?.app",
+            source: .macAppStore,
+            sourceIdentifier: "6784293008",
+            currentVersion: "1.0.0",
+            availableVersion: "1.1.0",
+            status: .manualAction,
+            installActionTitle: "Update from App Store",
+            canInstall: true,
+            isAutoEligible: false
+        )
+
+        XCTAssertFalse(AppUpdateEligibility.isResolvedByInstalledVersion(record, installedVersion: "1.0.0"))
+        XCTAssertTrue(AppUpdateEligibility.isResolvedByInstalledVersion(record, installedVersion: "1.1"))
+        XCTAssertTrue(AppUpdateEligibility.isResolvedByInstalledVersion(record, installedVersion: "1.2.0"))
+
+        let sparkleRecord = AppUpdateRecord(
+            appID: "docky",
+            appName: "Docky",
+            bundleIdentifier: "gt.quintero.Docky",
+            appPath: "/Applications/Docky.app",
+            source: .directDownload,
+            sourceIdentifier: "https://getdocky.com/releases/appcast.xml",
+            currentVersion: "0.6.2",
+            availableVersion: "0.8.0",
+            status: .manualAction,
+            installActionTitle: "Open Updater",
+            canInstall: true,
+            isAutoEligible: false
+        )
+        XCTAssertFalse(AppUpdateEligibility.isResolvedByInstalledVersion(sparkleRecord, installedVersion: "0.7.0"))
+        XCTAssertTrue(AppUpdateEligibility.isResolvedByInstalledVersion(sparkleRecord, installedVersion: "0.8.0"))
+
+        let adoption = AppUpdateRecord(
+            appID: "adoptable",
+            appName: "Adoptable App",
+            bundleIdentifier: "com.example.adoptable",
+            appPath: "/Applications/Adoptable App.app",
+            source: .homebrewCask,
+            sourceIdentifier: "adopt:adoptable-app",
+            currentVersion: "1.0",
+            availableVersion: "1.0",
+            status: .adoptable,
+            installActionTitle: "Adopt with Homebrew",
+            canInstall: true,
+            isAutoEligible: false
+        )
+        XCTAssertFalse(AppUpdateEligibility.isResolvedByInstalledVersion(adoption, installedVersion: "1.0"))
     }
 
     func testUpdatePersistenceAndSettingsRoundTrip() throws {
@@ -1164,6 +1806,37 @@ final class AppMonitorCoreTests: XCTestCase {
             installedAt: installedAt,
             bundleCreatedAt: bundleCreatedAt
         )
+    }
+}
+
+private final class RecordingUpdateCommandRunner: UpdateCommandRunning, @unchecked Sendable {
+    struct Call: Equatable {
+        let executable: String
+        let arguments: [String]
+        let environment: [String: String]
+        let privileged: Bool
+    }
+
+    private var remainingResults: [ShellCommandResult]
+    private(set) var calls: [Call] = []
+
+    init(results: [ShellCommandResult]) {
+        self.remainingResults = results
+    }
+
+    func run(_ executable: String, arguments: [String]) -> ShellCommandResult {
+        calls.append(Call(executable: executable, arguments: arguments, environment: [:], privileged: false))
+        return remainingResults.isEmpty ? ShellCommandResult(exitCode: 0, output: "") : remainingResults.removeFirst()
+    }
+
+    func run(_ executable: String, arguments: [String], environment: [String: String]) -> ShellCommandResult {
+        calls.append(Call(executable: executable, arguments: arguments, environment: environment, privileged: false))
+        return remainingResults.isEmpty ? ShellCommandResult(exitCode: 0, output: "") : remainingResults.removeFirst()
+    }
+
+    func runPrivileged(_ executable: String, arguments: [String]) -> ShellCommandResult {
+        calls.append(Call(executable: executable, arguments: arguments, environment: [:], privileged: true))
+        return remainingResults.isEmpty ? ShellCommandResult(exitCode: 0, output: "") : remainingResults.removeFirst()
     }
 }
 

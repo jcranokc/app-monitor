@@ -1,5 +1,6 @@
 import AppKit
 import AppMonitorCore
+import CryptoKit
 import Foundation
 import ServiceManagement
 import SwiftUI
@@ -60,6 +61,32 @@ struct OperationProgressSnapshot: Equatable {
     }()
 }
 
+private struct AppMonitorUpdateInstallPlan: Sendable {
+    let stagedAppURL: URL
+    let workDirectoryURL: URL
+    let currentBundleURL: URL
+}
+
+private enum AppMonitorSelfUpdateError: LocalizedError {
+    case missingPackageURL
+    case unsupportedPackage(String)
+    case appBundleNotFound
+    case checksumMismatch
+
+    var errorDescription: String? {
+        switch self {
+        case .missingPackageURL:
+            return "The update feed did not include a downloadable package."
+        case let .unsupportedPackage(pathExtension):
+            return "App Monitor cannot install .\(pathExtension) update packages yet."
+        case .appBundleNotFound:
+            return "The update package did not contain App Monitor.app."
+        case .checksumMismatch:
+            return "The downloaded update did not match the appcast checksum."
+        }
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     enum DashboardDestination: String, CaseIterable, Identifiable {
@@ -98,6 +125,39 @@ final class AppModel: ObservableObject {
                 return "Apps with no recorded local or imported activity"
             case .systemApps:
                 return "Non-user-facing apps and system bundles"
+            }
+        }
+    }
+
+    enum UpdateListFilter: Hashable {
+        case apps
+        case packages
+        case adoptable
+        case source(AppUpdateSource)
+
+        var title: String {
+            switch self {
+            case .apps:
+                return "Apps"
+            case .packages:
+                return "Packages"
+            case .adoptable:
+                return "Adoptable"
+            case let .source(source):
+                return source.displayName
+            }
+        }
+
+        func includes(_ record: AppUpdateRecord) -> Bool {
+            switch self {
+            case .apps:
+                return record.source != .homebrewFormula
+            case .packages:
+                return record.source == .homebrewFormula
+            case .adoptable:
+                return record.status == .adoptable
+            case let .source(source):
+                return record.source == source
             }
         }
     }
@@ -149,6 +209,7 @@ final class AppModel: ObservableObject {
     @Published var period: ReportingPeriod = .week {
         didSet {
             selectedTimelineSession = nil
+            focusedUpdateID = nil
             let defaultGrouping = UsageTrendGrouping.defaultGrouping(for: period)
             if usageTrendGrouping != defaultGrouping {
                 usageTrendGrouping = defaultGrouping
@@ -186,10 +247,22 @@ final class AppModel: ObservableObject {
     @Published var cleanupProgress = OperationProgressSnapshot.idle
     @Published var isCheckingUpdates = false
     @Published var isRunningUpdates = false
+    @Published var isCheckingAppMonitorUpdate = false
+    @Published var isInstallingAppMonitorUpdate = false
     @Published var updateProgress = OperationProgressSnapshot.idle
     @Published var updateRecords: [AppUpdateRecord] = []
+    @Published var updateListFilter: UpdateListFilter?
     @Published var selectedUpdateIDs: Set<String> = []
+    @Published var focusedUpdateID: String?
     @Published var updateSettings = AppUpdateSettings()
+    @Published var appMonitorUpdateRecord: AppUpdateRecord?
+    @Published var appMonitorUpdateItem: SparkleAppcastItem?
+    @Published var appMonitorUpdateLastCheckAt = AppModel.loadAppMonitorUpdateLastCheckAt()
+    @Published var appMonitorUpdateNextCheckAt = AppModel.loadAppMonitorUpdateNextCheckAt()
+    @Published var appMonitorUpdateChecksEnabled = AppModel.loadAppMonitorUpdateChecksEnabled()
+    @Published var appMonitorAutomaticUpdatesEnabled = AppModel.loadAppMonitorAutomaticUpdatesEnabled()
+    @Published var appMonitorUpdateCadenceHours = AppModel.loadAppMonitorUpdateCadenceHours()
+    @Published var appMonitorUpdateMessage = AppModel.loadAppMonitorUpdateLastCheckAt() == nil ? "Not checked yet" : "No App Monitor update loaded."
     @Published var updateRuns: [UpdateRunRecord] = []
     @Published var updateItemResults: [UpdateItemResult] = []
     @Published var changeLogEntries: [AppChangeLogEntry] = []
@@ -209,6 +282,9 @@ final class AppModel: ObservableObject {
     @Published var loginItemEnabled = false
     @Published var loginItemStatus = "Unknown"
     @Published var keepRunningWhenClosed = AppLifecycleSettings.keepRunningWhenClosed
+    @Published var appearancePreference = AppAppearanceSettings.preference {
+        didSet { AppAppearanceSettings.preference = appearancePreference }
+    }
     @Published var trackingStartedAt: Date?
     @Published var destination: DashboardDestination = .overview
     @Published var appListQuickFilter: AppListQuickFilter = .all {
@@ -251,8 +327,14 @@ final class AppModel: ObservableObject {
     private var terminationObserver: NSObjectProtocol?
     private var schedulerTimer: Timer?
     private var updateSchedulerTimer: Timer?
+    private var appMonitorUpdateSchedulerTimer: Timer?
     private var appListRowCounts: [AppListQuickFilter: Int] = [:]
     private var storageCategoriesByAppID: [String: Set<StorageCategory>] = [:]
+    private static let appMonitorUpdateLastCheckAtKey = "AppMonitorUpdateLastCheckAt"
+    private static let appMonitorUpdateNextCheckAtKey = "AppMonitorUpdateNextCheckAt"
+    private static let appMonitorUpdateChecksEnabledKey = "AppMonitorUpdateChecksEnabled"
+    private static let appMonitorAutomaticUpdatesEnabledKey = "AppMonitorAutomaticUpdatesEnabled"
+    private static let appMonitorUpdateCadenceHoursKey = "AppMonitorUpdateCadenceHours"
 
     private static let percentFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
@@ -271,6 +353,27 @@ final class AppModel: ObservableObject {
         return formatter.string(from: date).lowercased()
     }
 
+    private static func loadAppMonitorUpdateLastCheckAt() -> Date? {
+        UserDefaults.standard.object(forKey: appMonitorUpdateLastCheckAtKey) as? Date
+    }
+
+    private static func loadAppMonitorUpdateNextCheckAt() -> Date? {
+        UserDefaults.standard.object(forKey: appMonitorUpdateNextCheckAtKey) as? Date
+    }
+
+    private static func loadAppMonitorUpdateChecksEnabled() -> Bool {
+        UserDefaults.standard.bool(forKey: appMonitorUpdateChecksEnabledKey)
+    }
+
+    private static func loadAppMonitorAutomaticUpdatesEnabled() -> Bool {
+        UserDefaults.standard.bool(forKey: appMonitorAutomaticUpdatesEnabledKey)
+    }
+
+    private static func loadAppMonitorUpdateCadenceHours() -> Int {
+        let value = UserDefaults.standard.integer(forKey: appMonitorUpdateCadenceHoursKey)
+        return value > 0 ? value : 24
+    }
+
     init() {
         do {
             dataStore = try AppDataStore()
@@ -278,6 +381,7 @@ final class AppModel: ObservableObject {
             fatalError("Unable to create App Monitor datastore: \(error)")
         }
         tracker = UsageTracker(dataStore: dataStore)
+        AppAppearanceSettings.apply(appearancePreference)
         terminationObserver = NotificationCenter.default.addObserver(
             forName: .appMonitorWillTerminate,
             object: nil,
@@ -291,6 +395,7 @@ final class AppModel: ObservableObject {
     deinit {
         schedulerTimer?.invalidate()
         updateSchedulerTimer?.invalidate()
+        appMonitorUpdateSchedulerTimer?.invalidate()
         if let terminationObserver {
             NotificationCenter.default.removeObserver(terminationObserver)
         }
@@ -339,8 +444,20 @@ final class AppModel: ObservableObject {
     }
 
     var selectedRow: AppUsageRow? {
-        guard let selectedAppID else { return displayedRows.first }
-        return displayedRows.first { $0.app.id == selectedAppID } ?? displayedRows.first
+        if let selectedAppID {
+            if let row = displayedRows.first(where: { $0.app.id == selectedAppID }) {
+                return row
+            }
+            if let focusedUpdateRecord,
+               focusedUpdateRecord.appID == selectedAppID {
+                return fallbackUsageRow(from: focusedUpdateRecord)
+            }
+            return displayedRows.first
+        }
+        if let focusedUpdateRecord {
+            return fallbackUsageRow(from: focusedUpdateRecord)
+        }
+        return displayedRows.first
     }
 
     var totalUsageSeconds: TimeInterval {
@@ -423,12 +540,29 @@ final class AppModel: ObservableObject {
         updateRecords.filter { $0.status.countsAsAvailable }.count
     }
 
+    var filteredUpdateRecords: [AppUpdateRecord] {
+        guard let updateListFilter else { return updateRecords }
+        return updateRecords.filter(updateListFilter.includes)
+    }
+
+    var filteredAvailableUpdateCount: Int {
+        filteredUpdateRecords.filter { $0.status.countsAsAvailable }.count
+    }
+
     var autoEligibleUpdateCount: Int {
         updateRecords.filter(isUpdateAutoEligible).count
     }
 
     var manualUpdateCount: Int {
-        updateRecords.filter { $0.status == .manualAction || $0.requiresAdmin || $0.requiresRestart }.count
+        updateRecords.filter { $0.status == .manualAction || $0.status == .adoptable || $0.requiresAdmin || $0.requiresRestart }.count
+    }
+
+    var adoptableUpdateCount: Int {
+        updateRecords.filter { $0.status == .adoptable }.count
+    }
+
+    var adoptAndUpdateAllCount: Int {
+        updateRecords.filter(isBulkHomebrewActionable).count
     }
 
     var selectedUpdateCount: Int {
@@ -444,18 +578,73 @@ final class AppModel: ObservableObject {
     }
 
     var selectedUpdateRecord: AppUpdateRecord? {
+        if let focusedUpdateRecord { return focusedUpdateRecord }
         guard let selectedAppID else { return nil }
         return updateRecords.first { $0.appID == selectedAppID }
     }
 
+    var selectedAdoptableUpdateRecord: AppUpdateRecord? {
+        guard let selectedRow else { return nil }
+        return adoptableUpdateRecord(for: selectedRow)
+    }
+
     var selectedUpdateResult: UpdateItemResult? {
+        if let focusedUpdateID,
+           let focused = updateItemResults.first(where: { $0.updateID == focusedUpdateID }) {
+            return shouldHideUpdateResult(focused) ? nil : focused
+        }
         guard let selectedAppID else { return nil }
-        return updateItemResults.first { $0.appID == selectedAppID }
+        guard let result = updateItemResults.first(where: { $0.appID == selectedAppID }) else { return nil }
+        return shouldHideUpdateResult(result) ? nil : result
     }
 
     var selectedChangeLogEntries: [AppChangeLogEntry] {
+        if let focused = focusedUpdateRecord {
+            let focusedEntries = changeLogEntries.filter {
+                $0.source == focused.source
+                    && $0.sourceIdentifier == focused.sourceIdentifier
+                    && (focused.appID == nil || $0.appID == focused.appID)
+            }
+            if !focusedEntries.isEmpty { return focusedEntries }
+            if let focusedAppID = focused.appID {
+                return changeLogEntries.filter { $0.appID == focusedAppID }
+            }
+            return []
+        }
         guard let selectedAppID else { return [] }
-        return changeLogEntries.filter { $0.appID == selectedAppID }
+        let appEntries = changeLogEntries.filter { $0.appID == selectedAppID }
+        guard let focused = selectedUpdateRecord else { return appEntries }
+        let focusedEntries = appEntries.filter {
+            $0.source == focused.source && $0.sourceIdentifier == focused.sourceIdentifier
+        }
+        return focusedEntries.isEmpty ? appEntries : focusedEntries
+    }
+
+    private var focusedUpdateRecord: AppUpdateRecord? {
+        guard let focusedUpdateID else { return nil }
+        return updateRecords.first { $0.id == focusedUpdateID }
+    }
+
+    private func fallbackUsageRow(from record: AppUpdateRecord) -> AppUsageRow {
+        let path = record.appPath ?? record.installActionURL ?? record.sourceIdentifier
+        let app = MonitoredApp(
+            id: record.appID ?? "\(record.bundleIdentifier ?? record.source.rawValue)|\(path)",
+            name: record.appName,
+            bundleIdentifier: record.bundleIdentifier,
+            version: record.currentVersion,
+            path: path,
+            isUserFacing: true,
+            lastSeen: record.checkedAt
+        )
+        return AppUsageRow(
+            app: app,
+            usageSeconds: 0,
+            lastUsed: nil,
+            bundleSizeBytes: 0,
+            relatedSizeBytes: 0,
+            warningCount: 0,
+            scannedAt: nil
+        )
     }
 
     var reviewLargeFileCount: Int {
@@ -470,8 +659,10 @@ final class AppModel: ObservableObject {
         tracker.start()
         startScheduler()
         startUpdateScheduler()
+        startAppMonitorUpdateScheduler()
         await refreshInventory()
         await refreshImportedActivity()
+        await refreshStoredChangeLogNotes()
     }
 
     func refreshInventory() async {
@@ -492,6 +683,29 @@ final class AppModel: ObservableObject {
             lastMessage = "Inventory scan failed: \(error.localizedDescription)"
         }
         isLoadingInventory = false
+    }
+
+    func reconcileInstalledAppUpdates() {
+        guard hasBootstrapped, !isCheckingUpdates, !isRunningUpdates else { return }
+        let previousIDs = Set(updateRecords.map(\.id))
+        let reconciledRecords = pruneResolvedUpdateRecords(updateRecords)
+        guard reconciledRecords != updateRecords else { return }
+
+        updateRecords = reconciledRecords
+        let activeIDs = Set(updateRecords.map(\.id))
+        let removedIDs = previousIDs.subtracting(activeIDs)
+        selectedUpdateIDs.subtract(removedIDs)
+        if let focusedUpdateID, removedIDs.contains(focusedUpdateID) {
+            self.focusedUpdateID = nil
+        }
+
+        do {
+            try dataStore.replaceAppUpdates(updateRecords)
+            let count = removedIDs.count
+            lastMessage = "Cleared \(count) completed app update\(count == 1 ? "" : "s")"
+        } catch {
+            lastMessage = "Could not save completed app updates: \(error.localizedDescription)"
+        }
     }
 
     func runFullScan() async {
@@ -624,7 +838,7 @@ final class AppModel: ObservableObject {
         guard !isCheckingUpdates, !isRunningUpdates else { return }
         isCheckingUpdates = true
         updateProgress = OperationProgressSnapshot(
-            title: "Checking updates",
+            title: "Checking installed app updates",
             detail: "Preparing providers...",
             completedUnitCount: 0,
             totalUnitCount: 4,
@@ -632,7 +846,7 @@ final class AppModel: ObservableObject {
             scannedFileCount: 0,
             scannedBytes: 0
         )
-        lastMessage = "Checking for app updates..."
+        lastMessage = "Checking installed apps for updates..."
 
         do {
             let apps = try appsForUpdateChecks()
@@ -641,7 +855,7 @@ final class AppModel: ObservableObject {
 
             for (index, provider) in providers.enumerated() {
                 updateProgress = OperationProgressSnapshot(
-                    title: "Checking updates",
+                    title: "Checking installed app updates",
                     detail: "Checking \(provider.source.displayName)",
                     completedUnitCount: index,
                     totalUnitCount: providers.count,
@@ -652,14 +866,19 @@ final class AppModel: ObservableObject {
                 records.append(contentsOf: await provider.checkUpdates(apps: apps))
             }
 
-            records = records
-                .map(recordWithCurrentAutoEligibility)
-                .sorted(by: updateRecordComparator)
+            records = pruneResolvedUpdateRecords(
+                pruneDirectSourceRecordsManagedByHomebrew(
+                    records.map(recordWithCurrentAutoEligibility)
+                )
+            )
+            records.sort(by: updateRecordComparator)
             updateSettings.lastCheckAt = Date()
             updateSettings.nextCheckAt = updateSettings.scheduledChecksEnabled
                 ? updateSettings.nextCheckDate(from: updateSettings.lastCheckAt ?? Date())
                 : nil
-            let discoveredChangeLogs = changeLogEntries(from: records, runID: nil, results: [])
+            let discoveredChangeLogs = await Self.enrichedChangeLogEntries(
+                changeLogEntries(from: records, runID: nil, results: [])
+            )
             try dataStore.saveUpdateSettings(updateSettings)
             try dataStore.replaceAppUpdates(records)
             try dataStore.upsertChangeLogEntries(discoveredChangeLogs)
@@ -669,11 +888,11 @@ final class AppModel: ObservableObject {
             updateItemResults = try dataStore.fetchUpdateItemResults()
             changeLogEntries = try dataStore.fetchChangeLogEntries()
             try dataStore.recordAction(
-                title: "Checked Updates",
-                detail: "\(records.filter { $0.status.countsAsAvailable }.count) update\(records.filter { $0.status.countsAsAvailable }.count == 1 ? "" : "s") found"
+                title: "Checked Installed App Updates",
+                detail: "\(records.filter { $0.status.countsAsAvailable }.count) installed app update\(records.filter { $0.status.countsAsAvailable }.count == 1 ? "" : "s") found"
             )
             actionHistory = try dataStore.fetchActionHistory()
-            lastMessage = "Found \(availableUpdateCount) available update\(availableUpdateCount == 1 ? "" : "s")"
+            lastMessage = "Found \(availableUpdateCount) installed app update\(availableUpdateCount == 1 ? "" : "s")"
 
             if runAutomaticEligible, updateSettings.automaticUpdatesEnabled {
                 let eligible = updateRecords.filter(isUpdateAutoEligible)
@@ -682,11 +901,68 @@ final class AppModel: ObservableObject {
                 }
             }
         } catch {
-            lastMessage = "Update check failed: \(error.localizedDescription)"
+            lastMessage = "Installed app update check failed: \(error.localizedDescription)"
         }
 
         updateProgress = .idle
         isCheckingUpdates = false
+    }
+
+    func checkForAppMonitorUpdate(installIfAvailable: Bool = false) async {
+        guard !isCheckingAppMonitorUpdate, !isInstallingAppMonitorUpdate else { return }
+        isCheckingAppMonitorUpdate = true
+        appMonitorUpdateMessage = "Checking App Monitor..."
+        lastMessage = "Checking for App Monitor updates..."
+
+        defer {
+            isCheckingAppMonitorUpdate = false
+        }
+
+        guard let appcastURL = appMonitorAppcastURL() else {
+            appMonitorUpdateRecord = nil
+            appMonitorUpdateItem = nil
+            appMonitorUpdateMessage = "No App Monitor update feed is configured for this build."
+            lastMessage = appMonitorUpdateMessage
+            return
+        }
+
+        guard let currentApp = currentAppForUpdateDetection() else {
+            appMonitorUpdateRecord = nil
+            appMonitorUpdateItem = nil
+            appMonitorUpdateMessage = "App Monitor update checks are available from the packaged app."
+            lastMessage = appMonitorUpdateMessage
+            return
+        }
+
+        do {
+            let item = try await fetchAppMonitorUpdateItem(from: appcastURL)
+            let checkedAt = Date()
+            appMonitorUpdateLastCheckAt = checkedAt
+            UserDefaults.standard.set(checkedAt, forKey: Self.appMonitorUpdateLastCheckAtKey)
+            updateNextAppMonitorUpdateCheck(from: checkedAt)
+
+            guard item.version.map({ VersionComparator.isVersion($0, newerThan: currentApp.version) }) ?? false else {
+                appMonitorUpdateRecord = nil
+                appMonitorUpdateItem = nil
+                appMonitorUpdateMessage = "App Monitor is up to date."
+                lastMessage = appMonitorUpdateMessage
+                return
+            }
+
+            appMonitorUpdateItem = item
+            appMonitorUpdateRecord = appMonitorUpdateRecord(from: item, currentApp: currentApp, appcastURL: appcastURL, checkedAt: checkedAt)
+            appMonitorUpdateMessage = "App Monitor \(item.version ?? "update") is available."
+            lastMessage = appMonitorUpdateMessage
+
+            if installIfAvailable {
+                await installAppMonitorUpdate()
+            }
+        } catch {
+            appMonitorUpdateRecord = nil
+            appMonitorUpdateItem = nil
+            appMonitorUpdateMessage = "App Monitor update check failed: \(error.localizedDescription)"
+            lastMessage = appMonitorUpdateMessage
+        }
     }
 
     func setUpdateSelected(_ record: AppUpdateRecord, selected: Bool) {
@@ -698,7 +974,7 @@ final class AppModel: ObservableObject {
     }
 
     func selectAllAvailableUpdates() {
-        selectedUpdateIDs = Set(updateRecords.filter { $0.canInstall && $0.status.countsAsAvailable }.map(\.id))
+        selectedUpdateIDs = Set(filteredUpdateRecords.filter { $0.canInstall && $0.status.countsAsAvailable }.map(\.id))
     }
 
     func clearSelectedUpdates() {
@@ -706,14 +982,82 @@ final class AppModel: ObservableObject {
     }
 
     func updateSelectedRecords() async {
-        await performUpdates(selectedUpdateRecords.filter { $0.canInstall }, mode: .manual)
+        await performUpdates(selectedUpdateRecords, mode: .manual)
+    }
+
+    func updateRecord(_ record: AppUpdateRecord) async {
+        await performUpdates([recordWithCurrentAutoEligibility(record)], mode: .manual)
+    }
+
+    func adoptableUpdateRecord(for row: AppUsageRow) -> AppUpdateRecord? {
+        updateRecords.first {
+            $0.status == .adoptable
+                && ($0.appID == row.app.id || $0.appPath == row.app.path)
+        }
     }
 
     func updateAllEligibleRecords() async {
         await performUpdates(updateRecords.filter(isUpdateAutoEligible), mode: .automatic)
     }
 
+    func adoptAndUpdateAllRecords() async {
+        let records = updateRecords
+            .filter(isBulkHomebrewActionable)
+            .sorted { lhs, rhs in
+                if lhs.status == .adoptable, rhs.status != .adoptable { return true }
+                if lhs.status != .adoptable, rhs.status == .adoptable { return false }
+                return updateRecordComparator(lhs, rhs)
+            }
+        await performUpdates(records, mode: .manual)
+    }
+
+    func forgetSavedHomebrewAdministratorPassword() async {
+        guard !isRunningUpdates else {
+            lastMessage = "Wait for the current Homebrew update run to finish"
+            return
+        }
+        guard let helperURL = HomebrewAskpassHelper.executableURL() else {
+            lastMessage = "The secure Homebrew authorization helper is unavailable"
+            return
+        }
+        let result = await Task.detached(priority: .userInitiated) {
+            ProcessUpdateCommandRunner().run(helperURL.path, arguments: ["--forget"])
+        }.value
+        if result.exitCode == 0 {
+            lastMessage = "Removed the saved Homebrew administrator password from your Mac Keychain"
+        } else {
+            lastMessage = "Could not remove the saved Homebrew password: \(result.output)"
+        }
+    }
+
+    func selectUpdate(_ record: AppUpdateRecord) {
+        selectedTimelineSession = nil
+        selectedWarningID = nil
+        focusedUpdateID = record.id
+        if let appID = record.appID,
+           rows.contains(where: { $0.app.id == appID }) {
+            selectedAppID = appID
+        } else if let appPath = record.appPath,
+                  let row = rows.first(where: { $0.app.path == appPath }) {
+            selectedAppID = row.app.id
+        } else {
+            selectedAppID = record.appID
+            refreshSelectedDailyRows()
+            loadSelectedStorageItems()
+            lastMessage = "Selected update: \(record.appName)"
+            return
+        }
+        refreshSelectedDailyRows()
+        loadSelectedStorageItems()
+        lastMessage = "Selected update: \(record.appName)"
+    }
+
     func openUpdateSource(_ record: AppUpdateRecord) {
+        let record = recordWithCurrentAutoEligibility(record)
+        if isGuidedManualUpdate(record) {
+            Task { await updateRecord(record) }
+            return
+        }
         if let urlString = record.installActionURL, let url = URL(string: urlString) {
             NSWorkspace.shared.open(url)
             return
@@ -733,10 +1077,45 @@ final class AppModel: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
+    func installAppMonitorUpdate() async {
+        guard !isInstallingAppMonitorUpdate else { return }
+        guard let item = appMonitorUpdateItem, item.url != nil else {
+            appMonitorUpdateMessage = "Check App Monitor first to load an update package."
+            lastMessage = appMonitorUpdateMessage
+            return
+        }
+
+        isInstallingAppMonitorUpdate = true
+        appMonitorUpdateMessage = "Preparing App Monitor update..."
+        lastMessage = appMonitorUpdateMessage
+
+        do {
+            let currentBundleURL = Bundle.main.bundleURL.standardizedFileURL
+            let plan = try await Task.detached(priority: .userInitiated) {
+                try await Self.prepareAppMonitorUpdateInstall(item: item, currentBundleURL: currentBundleURL)
+            }.value
+            try launchAppMonitorUpdateInstaller(plan: plan)
+            appMonitorUpdateMessage = "Installing App Monitor update. App Monitor will relaunch."
+            lastMessage = appMonitorUpdateMessage
+            NSApp.terminate(nil)
+        } catch {
+            appMonitorUpdateMessage = "App Monitor update install failed: \(error.localizedDescription)"
+            lastMessage = appMonitorUpdateMessage
+            isInstallingAppMonitorUpdate = false
+        }
+    }
+
     func isUpdateAutoEligible(_ record: AppUpdateRecord) -> Bool {
         AppUpdateEligibility.isAutoEligible(
             record: record,
             isAppRunning: isAppRunning(for: record),
+            settings: updateSettings
+        )
+    }
+
+    func isBulkHomebrewActionable(_ record: AppUpdateRecord) -> Bool {
+        AppUpdateEligibility.isBulkHomebrewActionable(
+            record: record,
             settings: updateSettings
         )
     }
@@ -756,9 +1135,39 @@ final class AppModel: ObservableObject {
         startUpdateScheduler()
     }
 
+    func updateAppMonitorUpdateSchedule(enabled: Bool? = nil, cadenceHours: Int? = nil) {
+        if let enabled {
+            appMonitorUpdateChecksEnabled = enabled
+            UserDefaults.standard.set(enabled, forKey: Self.appMonitorUpdateChecksEnabledKey)
+            appMonitorUpdateNextCheckAt = enabled ? nextAppMonitorUpdateCheckDate() : nil
+            persistAppMonitorUpdateNextCheckAt()
+        }
+        if let cadenceHours {
+            appMonitorUpdateCadenceHours = cadenceHours
+            UserDefaults.standard.set(cadenceHours, forKey: Self.appMonitorUpdateCadenceHoursKey)
+            if appMonitorUpdateChecksEnabled {
+                appMonitorUpdateNextCheckAt = nextAppMonitorUpdateCheckDate()
+                persistAppMonitorUpdateNextCheckAt()
+            }
+        }
+        startAppMonitorUpdateScheduler()
+    }
+
+    func updateAppMonitorAutomaticUpdates(enabled: Bool) {
+        appMonitorAutomaticUpdatesEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.appMonitorAutomaticUpdatesEnabledKey)
+        if enabled, !appMonitorUpdateChecksEnabled {
+            updateAppMonitorUpdateSchedule(enabled: true)
+        }
+    }
+
     func updateAutomaticUpdates(enabled: Bool) {
         updateSettings.automaticUpdatesEnabled = enabled
-        updateRecords = updateRecords.map(recordWithCurrentAutoEligibility)
+        updateRecords = pruneResolvedUpdateRecords(
+            pruneDirectSourceRecordsManagedByHomebrew(
+                updateRecords.map(recordWithCurrentAutoEligibility)
+            )
+        )
         persistUpdateSettings()
     }
 
@@ -780,7 +1189,7 @@ final class AppModel: ObservableObject {
     }
 
     private func performUpdates(_ records: [AppUpdateRecord], mode: UpdateRunMode) async {
-        let records = records.filter { $0.canInstall }
+        let records = records.map(recordWithCurrentAutoEligibility).filter { $0.canInstall }
         guard !records.isEmpty else {
             lastMessage = "No eligible updates selected"
             return
@@ -792,7 +1201,10 @@ final class AppModel: ObservableObject {
             if mode == .automatic, !isUpdateAutoEligible(record) {
                 continue
             }
-            if mode == .manual, let app = app(for: record), isAppRunning(for: record) {
+            if mode == .manual,
+               shouldPromptToQuitBeforeUpdate(record),
+               let app = app(for: record),
+               isAppRunning(for: record) {
                 guard await promptIfAppIsRunningForUpdate(app) else { continue }
             }
             runnableRecords.append(record)
@@ -804,12 +1216,15 @@ final class AppModel: ObservableObject {
         }
 
         isRunningUpdates = true
+        defer {
+            isRunningUpdates = false
+        }
         let runID = UUID().uuidString
         let startedAt = Date()
         var results: [UpdateItemResult] = []
         updateProgress = OperationProgressSnapshot(
-            title: mode == .automatic ? "Running automatic updates" : "Running updates",
-            detail: "Starting updates...",
+            title: mode == .automatic ? "Running automatic app updates" : "Running installed app updates",
+            detail: "Starting installed app updates...",
             completedUnitCount: 0,
             totalUnitCount: runnableRecords.count,
             currentPath: nil,
@@ -819,7 +1234,7 @@ final class AppModel: ObservableObject {
 
         for (index, record) in runnableRecords.enumerated() {
             updateProgress = OperationProgressSnapshot(
-                title: mode == .automatic ? "Running automatic updates" : "Running updates",
+                title: mode == .automatic ? "Running automatic app updates" : "Running installed app updates",
                 detail: "Updating \(record.appName)",
                 completedUnitCount: index,
                 totalUnitCount: runnableRecords.count,
@@ -860,8 +1275,15 @@ final class AppModel: ObservableObject {
         )
 
         do {
-            updateRecords = updateRecords.map(recordWithCurrentAutoEligibility).sorted(by: updateRecordComparator)
-            let resultChangeLogs = changeLogEntries(from: runnableRecords, runID: runID, results: results)
+            updateRecords = pruneResolvedUpdateRecords(
+                pruneDirectSourceRecordsManagedByHomebrew(
+                    updateRecords.map(recordWithCurrentAutoEligibility)
+                )
+            )
+            updateRecords.sort(by: updateRecordComparator)
+            let resultChangeLogs = await Self.enrichedChangeLogEntries(
+                changeLogEntries(from: runnableRecords, runID: runID, results: results)
+            )
             try dataStore.replaceAppUpdates(updateRecords)
             try dataStore.recordUpdateRun(run, itemResults: results)
             try dataStore.upsertChangeLogEntries(resultChangeLogs)
@@ -888,7 +1310,6 @@ final class AppModel: ObservableObject {
             scannedFileCount: 0,
             scannedBytes: 0
         )
-        isRunningUpdates = false
     }
 
     func reloadRows() {
@@ -992,6 +1413,7 @@ final class AppModel: ObservableObject {
 
     func select(_ row: AppUsageRow) {
         selectedTimelineSession = nil
+        focusedUpdateID = nil
         selectedAppID = row.app.id
         refreshSelectedDailyRows()
         loadSelectedStorageItems()
@@ -999,6 +1421,7 @@ final class AppModel: ObservableObject {
 
     func selectWarning(_ warning: AppWarningItem) {
         selectedTimelineSession = nil
+        focusedUpdateID = nil
         selectedWarningID = warning.id
         selectedAppID = warning.appID
         refreshSelectedDailyRows()
@@ -1026,12 +1449,14 @@ final class AppModel: ObservableObject {
 
     func selectTimelineApp(appID: String) {
         selectedTimelineSession = nil
+        focusedUpdateID = nil
         selectedAppID = appID
         refreshSelectedDailyRows()
         loadSelectedStorageItems()
     }
 
     func selectTimelineSession(_ session: TimelineSession) {
+        focusedUpdateID = nil
         selectedTimelineSession = session
         selectedAppID = session.appID
         refreshSelectedDailyRows()
@@ -1210,15 +1635,19 @@ final class AppModel: ObservableObject {
         self.destination = destination
     }
 
-    func showUpdates() {
+    func showUpdates(filter: UpdateListFilter? = nil) {
+        updateListFilter = filter
         destination = .updates
-        lastMessage = availableUpdateCount == 0 ? "No available updates loaded" : "Showing \(availableUpdateCount) available updates"
+        let count = filteredAvailableUpdateCount
+        let scope = filter.map { " \(String($0.title).lowercased())" } ?? ""
+        lastMessage = count == 0 ? "No\(scope) installed app updates loaded" : "Showing \(count)\(scope) installed app update\(count == 1 ? "" : "s")"
     }
 
     func showAppList(_ filter: AppListQuickFilter) {
         destination = .usageTable
         appListQuickFilter = filter
         selectedTimelineSession = nil
+        focusedUpdateID = nil
         ensureSelectionMatchesDisplayedRows()
         loadSelectedStorageItems()
         lastMessage = filter == .all ? "Showing all apps" : "Showing \(filter.rawValue)"
@@ -1692,6 +2121,7 @@ final class AppModel: ObservableObject {
         focusedCleanupSuggestionID = suggestion.id
         selectedAppID = suggestion.appID
         selectedTimelineSession = nil
+        focusedUpdateID = nil
         refreshSelectedDailyRows()
         loadSelectedStorageItems()
     }
@@ -1882,6 +2312,11 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func setAppearancePreference(_ preference: AppAppearancePreference) {
+        appearancePreference = preference
+        lastMessage = "Appearance set to \(preference.settingsTitle)"
+    }
+
     private func updateStorageScanProgress(
         appName: String,
         appIndex: Int,
@@ -1945,11 +2380,23 @@ final class AppModel: ObservableObject {
             savedFilters = try dataStore.fetchSavedFilters()
             scanSchedule = try dataStore.fetchScanSchedule()
             updateSettings = try dataStore.fetchUpdateSettings()
-            updateRecords = try dataStore.fetchAppUpdates()
+            let storedUpdateRecords = try dataStore.fetchAppUpdates()
+            updateRecords = pruneResolvedUpdateRecords(
+                pruneDirectSourceRecordsManagedByHomebrew(
+                    storedUpdateRecords.map(recordWithCurrentAutoEligibility)
+                )
+            )
+            if updateRecords != storedUpdateRecords {
+                try dataStore.replaceAppUpdates(updateRecords)
+            }
             updateRuns = try dataStore.fetchUpdateRuns()
             updateItemResults = try dataStore.fetchUpdateItemResults()
             changeLogEntries = try dataStore.fetchChangeLogEntries()
-            selectedUpdateIDs.formIntersection(Set(updateRecords.map(\.id)))
+            let activeUpdateIDs = Set(updateRecords.map(\.id))
+            selectedUpdateIDs.formIntersection(activeUpdateIDs)
+            if let focusedUpdateID, !activeUpdateIDs.contains(focusedUpdateID) {
+                self.focusedUpdateID = nil
+            }
             actionHistory = try dataStore.fetchActionHistory()
             loadSelectedStorageItems()
             refreshNavigationSnapshots(reloadUsageAnalytics: true, reloadTimeline: true)
@@ -2595,7 +3042,7 @@ final class AppModel: ObservableObject {
     }
 
     private func appsForUpdateChecks() throws -> [MonitoredApp] {
-        var apps = try dataStore.fetchApps(includeAll: true)
+        var apps = try dataStore.fetchApps(includeAll: false)
         guard let currentApp = currentAppForUpdateDetection(),
               !apps.contains(where: { $0.id == currentApp.id || $0.path == currentApp.path }) else {
             return apps
@@ -2610,8 +3057,553 @@ final class AppModel: ObservableObject {
         return inventoryScanner.app(at: bundleURL)
     }
 
+    private func appMonitorAppcastURL() -> URL? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String else {
+            return nil
+        }
+        return URL(string: value)
+    }
+
+    private func fetchAppMonitorUpdateItem(from url: URL) async throws -> SparkleAppcastItem {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        let (data, _) = try await URLSession.shared.data(for: request)
+        return try SparkleAppcastParser.latestItem(from: data)
+    }
+
+    private func appMonitorUpdateRecord(
+        from item: SparkleAppcastItem,
+        currentApp: MonitoredApp,
+        appcastURL: URL,
+        checkedAt: Date
+    ) -> AppUpdateRecord {
+        AppUpdateRecord(
+            appID: currentApp.id,
+            appName: "App Monitor",
+            bundleIdentifier: currentApp.bundleIdentifier,
+            appPath: currentApp.path,
+            source: .directDownload,
+            sourceIdentifier: appcastURL.absoluteString,
+            currentVersion: currentApp.version,
+            availableVersion: item.version,
+            status: .available,
+            checkedAt: checkedAt,
+            installActionTitle: "Install App Monitor Update",
+            installActionURL: item.url?.absoluteString,
+            requiresAdmin: false,
+            requiresRestart: true,
+            canInstall: true,
+            isAutoEligible: appMonitorAutomaticUpdatesEnabled,
+            releaseNotesTitle: item.title,
+            releaseNotesSummary: item.summary,
+            releaseNotesURL: item.releaseNotesURL?.absoluteString,
+            message: "Ready to install in place."
+        )
+    }
+
+    nonisolated private static func prepareAppMonitorUpdateInstall(
+        item: SparkleAppcastItem,
+        currentBundleURL: URL
+    ) async throws -> AppMonitorUpdateInstallPlan {
+        guard let packageURL = item.url else {
+            throw AppMonitorSelfUpdateError.missingPackageURL
+        }
+
+        let fileManager = FileManager.default
+        let workDirectoryURL = fileManager.temporaryDirectory
+            .appendingPathComponent("AppMonitorSelfUpdate-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: workDirectoryURL, withIntermediateDirectories: true)
+
+        let (downloadedURL, _) = try await URLSession.shared.download(from: packageURL)
+        let packageName = packageURL.lastPathComponent.isEmpty ? "AppMonitorUpdate" : packageURL.lastPathComponent
+        let packageFileURL = workDirectoryURL.appendingPathComponent(packageName)
+        try? fileManager.removeItem(at: packageFileURL)
+        try fileManager.moveItem(at: downloadedURL, to: packageFileURL)
+
+        if let expectedSHA256 = item.sha256?.trimmingCharacters(in: .whitespacesAndNewlines), !expectedSHA256.isEmpty {
+            let actualSHA256 = try sha256Hex(for: packageFileURL)
+            guard actualSHA256.caseInsensitiveCompare(expectedSHA256) == .orderedSame else {
+                throw AppMonitorSelfUpdateError.checksumMismatch
+            }
+        }
+
+        let extractedDirectoryURL = workDirectoryURL.appendingPathComponent("extracted", isDirectory: true)
+        try fileManager.createDirectory(at: extractedDirectoryURL, withIntermediateDirectories: true)
+        let stagedAppURL = workDirectoryURL.appendingPathComponent("App Monitor.app", isDirectory: true)
+        let packageExtension = packageFileURL.pathExtension.lowercased()
+
+        switch packageExtension {
+        case "zip":
+            try runProcess("/usr/bin/ditto", arguments: ["-x", "-k", packageFileURL.path, extractedDirectoryURL.path])
+            let appURL = try findAppMonitorApp(in: extractedDirectoryURL)
+            try copyAppBundle(from: appURL, to: stagedAppURL)
+        case "dmg":
+            let mountPointURL = workDirectoryURL.appendingPathComponent("mount", isDirectory: true)
+            try fileManager.createDirectory(at: mountPointURL, withIntermediateDirectories: true)
+            try runProcess("/usr/bin/hdiutil", arguments: ["attach", packageFileURL.path, "-nobrowse", "-readonly", "-mountpoint", mountPointURL.path])
+            defer {
+                try? runProcess("/usr/bin/hdiutil", arguments: ["detach", mountPointURL.path, "-quiet"])
+            }
+            let appURL = try findAppMonitorApp(in: mountPointURL)
+            try copyAppBundle(from: appURL, to: stagedAppURL)
+        default:
+            throw AppMonitorSelfUpdateError.unsupportedPackage(packageExtension.isEmpty ? "download" : packageExtension)
+        }
+
+        return AppMonitorUpdateInstallPlan(
+            stagedAppURL: stagedAppURL,
+            workDirectoryURL: workDirectoryURL,
+            currentBundleURL: currentBundleURL
+        )
+    }
+
+    nonisolated private static func copyAppBundle(from sourceURL: URL, to destinationURL: URL) throws {
+        try? FileManager.default.removeItem(at: destinationURL)
+        try runProcess("/usr/bin/ditto", arguments: [sourceURL.path, destinationURL.path])
+    }
+
+    nonisolated private static func findAppMonitorApp(in directoryURL: URL) throws -> URL {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directoryURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            throw AppMonitorSelfUpdateError.appBundleNotFound
+        }
+
+        for case let url as URL in enumerator {
+            guard url.pathExtension == "app" else { continue }
+            if url.lastPathComponent == "App Monitor.app" {
+                return url
+            }
+        }
+        throw AppMonitorSelfUpdateError.appBundleNotFound
+    }
+
+    nonisolated private static func sha256Hex(for url: URL) throws -> String {
+        let data = try Data(contentsOf: url)
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    nonisolated private static func runProcess(_ executable: String, arguments: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(
+                domain: "AppMonitorSelfUpdate",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: output.isEmpty ? "\(executable) failed." : output]
+            )
+        }
+    }
+
+    private func launchAppMonitorUpdateInstaller(plan: AppMonitorUpdateInstallPlan) throws {
+        let scriptURL = plan.workDirectoryURL.appendingPathComponent("install-app-monitor-update.sh")
+        let currentPath = plan.currentBundleURL.path
+        let stagedPath = plan.stagedAppURL.path
+        let workPath = plan.workDirectoryURL.path
+        let backupPath = "\(currentPath).previous-update"
+
+        let quotedCurrentPath = Self.shellQuote(currentPath)
+        let quotedStagedPath = Self.shellQuote(stagedPath)
+        let quotedWorkPath = Self.shellQuote(workPath)
+        let quotedBackupPath = Self.shellQuote(backupPath)
+        let privilegedCommand = [
+            "if [ -e \(quotedCurrentPath) ]; then /bin/rm -rf \(quotedBackupPath); /bin/mv \(quotedCurrentPath) \(quotedBackupPath); fi",
+            "/usr/bin/ditto \(quotedStagedPath) \(quotedCurrentPath)",
+            "/usr/bin/xattr -cr \(quotedCurrentPath) >/dev/null 2>&1 || true"
+        ].joined(separator: "; ")
+        let osascriptExpression = "do shell script \(Self.appleScriptString(privilegedCommand)) with administrator privileges"
+        let pid = ProcessInfo.processInfo.processIdentifier
+
+        let script = """
+        #!/bin/zsh
+        set -u
+
+        CURRENT_APP=\(quotedCurrentPath)
+        STAGED_APP=\(quotedStagedPath)
+        WORK_DIR=\(quotedWorkPath)
+        BACKUP_APP=\(quotedBackupPath)
+        APP_PID=\(pid)
+
+        replace_without_privileges() {
+          /bin/rm -rf "$BACKUP_APP" || return 1
+          if [ -e "$CURRENT_APP" ]; then
+            /bin/mv "$CURRENT_APP" "$BACKUP_APP" || return 1
+          fi
+          /usr/bin/ditto "$STAGED_APP" "$CURRENT_APP" || return 1
+          /usr/bin/xattr -cr "$CURRENT_APP" >/dev/null 2>&1 || true
+          return 0
+        }
+
+        while /bin/kill -0 "$APP_PID" >/dev/null 2>&1; do
+          /bin/sleep 0.2
+        done
+
+        if replace_without_privileges; then
+          /usr/bin/open "$CURRENT_APP"
+          /bin/rm -rf "$BACKUP_APP" "$WORK_DIR"
+          exit 0
+        fi
+
+        /usr/bin/osascript -e \(Self.shellQuote(osascriptExpression)) || exit 1
+        /usr/bin/open "$CURRENT_APP"
+        /bin/rm -rf "$BACKUP_APP" "$WORK_DIR"
+        """
+
+        try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = [scriptURL.path]
+        try process.run()
+    }
+
+    nonisolated private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    nonisolated private static func appleScriptString(_ value: String) -> String {
+        "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
+    }
+
     private func recordWithCurrentAutoEligibility(_ record: AppUpdateRecord) -> AppUpdateRecord {
-        record
+        if isObsoleteMacAppStoreSudoFailure(record) {
+            return AppUpdateRecord(
+                id: record.id,
+                appID: record.appID,
+                appName: record.appName,
+                bundleIdentifier: record.bundleIdentifier,
+                appPath: record.appPath,
+                source: record.source,
+                sourceIdentifier: record.sourceIdentifier,
+                currentVersion: record.currentVersion,
+                availableVersion: record.availableVersion,
+                status: .needsAdmin,
+                checkedAt: Date(),
+                installActionTitle: "Update from App Store",
+                installActionURL: record.installActionURL,
+                requiresAdmin: true,
+                requiresRestart: record.requiresRestart,
+                canInstall: true,
+                isAutoEligible: false,
+                releaseNotesTitle: record.releaseNotesTitle,
+                releaseNotesSummary: record.releaseNotesSummary,
+                releaseNotesURL: record.releaseNotesURL,
+                message: "Ready to update from the App Store."
+            )
+        }
+
+        if isObsoleteMacAppStoreBlockingAttempt(record) {
+            return AppUpdateRecord(
+                id: record.id,
+                appID: record.appID,
+                appName: record.appName,
+                bundleIdentifier: record.bundleIdentifier,
+                appPath: record.appPath,
+                source: record.source,
+                sourceIdentifier: record.sourceIdentifier,
+                currentVersion: record.currentVersion,
+                availableVersion: record.availableVersion,
+                status: .needsAdmin,
+                checkedAt: Date(),
+                installActionTitle: "Update from App Store",
+                installActionURL: record.installActionURL,
+                requiresAdmin: true,
+                requiresRestart: record.requiresRestart,
+                canInstall: true,
+                isAutoEligible: false,
+                releaseNotesTitle: record.releaseNotesTitle,
+                releaseNotesSummary: record.releaseNotesSummary,
+                releaseNotesURL: record.releaseNotesURL,
+                message: "Open the App Store to finish this update."
+            )
+        }
+
+        if isRetryableHomebrewMissingArtifactFailure(record) {
+            return AppUpdateRecord(
+                id: record.id,
+                appID: record.appID,
+                appName: record.appName,
+                bundleIdentifier: record.bundleIdentifier,
+                appPath: record.appPath,
+                source: record.source,
+                sourceIdentifier: record.sourceIdentifier,
+                currentVersion: record.currentVersion,
+                availableVersion: record.availableVersion,
+                status: .available,
+                checkedAt: Date(),
+                installActionTitle: "Repair with Homebrew",
+                installActionURL: record.installActionURL,
+                requiresAdmin: false,
+                requiresRestart: false,
+                canInstall: true,
+                isAutoEligible: false,
+                releaseNotesTitle: record.releaseNotesTitle,
+                releaseNotesSummary: record.releaseNotesSummary,
+                releaseNotesURL: record.releaseNotesURL,
+                message: "The Homebrew app artifact is missing. App Monitor will repair it by reinstalling the cask."
+            )
+        }
+
+        if isRetryableHomebrewFormulaFlagFailure(record) {
+            return AppUpdateRecord(
+                id: record.id,
+                appID: record.appID,
+                appName: record.appName,
+                bundleIdentifier: record.bundleIdentifier,
+                appPath: record.appPath,
+                source: record.source,
+                sourceIdentifier: record.sourceIdentifier,
+                currentVersion: record.currentVersion,
+                availableVersion: record.availableVersion,
+                status: .available,
+                checkedAt: Date(),
+                installActionTitle: "Update with Homebrew",
+                installActionURL: record.installActionURL,
+                requiresAdmin: false,
+                requiresRestart: false,
+                canInstall: true,
+                isAutoEligible: true,
+                releaseNotesTitle: record.releaseNotesTitle,
+                releaseNotesSummary: record.releaseNotesSummary,
+                releaseNotesURL: record.releaseNotesURL,
+                message: "Ready to retry with the corrected Homebrew formula command."
+            )
+        }
+
+        if isRetryableHomebrewAdoptPromptFailure(record) {
+            return AppUpdateRecord(
+                id: record.id,
+                appID: record.appID,
+                appName: record.appName,
+                bundleIdentifier: record.bundleIdentifier,
+                appPath: record.appPath,
+                source: record.source,
+                sourceIdentifier: record.sourceIdentifier,
+                currentVersion: record.currentVersion,
+                availableVersion: record.availableVersion,
+                status: .adoptable,
+                checkedAt: Date(),
+                installActionTitle: "Adopt with Homebrew",
+                installActionURL: record.installActionURL,
+                requiresAdmin: false,
+                requiresRestart: false,
+                canInstall: true,
+                isAutoEligible: false,
+                releaseNotesTitle: record.releaseNotesTitle,
+                releaseNotesSummary: record.releaseNotesSummary,
+                releaseNotesURL: record.releaseNotesURL,
+                message: "Homebrew can adopt this app. App Monitor will use a macOS password prompt for Homebrew's sudo step."
+            )
+        }
+
+        if isHomebrewReplaceManualAction(record) {
+            return AppUpdateRecord(
+                id: record.id,
+                appID: record.appID,
+                appName: record.appName,
+                bundleIdentifier: record.bundleIdentifier,
+                appPath: record.appPath,
+                source: record.source,
+                sourceIdentifier: record.sourceIdentifier,
+                currentVersion: record.currentVersion,
+                availableVersion: record.availableVersion,
+                status: .adoptable,
+                checkedAt: record.checkedAt,
+                installActionTitle: "Adopt with Homebrew",
+                installActionURL: record.installActionURL,
+                requiresAdmin: false,
+                requiresRestart: false,
+                canInstall: true,
+                isAutoEligible: false,
+                releaseNotesTitle: record.releaseNotesTitle,
+                releaseNotesSummary: record.releaseNotesSummary,
+                releaseNotesURL: record.releaseNotesURL,
+                message: "Homebrew has a newer cask. Adopt with Homebrew to replace the existing app and manage future updates."
+            )
+        }
+
+        if isHomebrewAdoptVersionMismatchFailure(record) {
+            let token = String(record.sourceIdentifier.dropFirst("adopt:".count))
+            return AppUpdateRecord(
+                id: AppUpdateRecord.makeID(source: record.source, sourceIdentifier: "replace:\(token)", appID: record.appID),
+                appID: record.appID,
+                appName: record.appName,
+                bundleIdentifier: record.bundleIdentifier,
+                appPath: record.appPath,
+                source: record.source,
+                sourceIdentifier: "replace:\(token)",
+                currentVersion: record.currentVersion,
+                availableVersion: record.availableVersion,
+                status: .adoptable,
+                checkedAt: Date(),
+                installActionTitle: "Adopt with Homebrew",
+                installActionURL: record.installActionURL,
+                requiresAdmin: false,
+                requiresRestart: false,
+                canInstall: true,
+                isAutoEligible: false,
+                releaseNotesTitle: record.releaseNotesTitle,
+                releaseNotesSummary: record.releaseNotesSummary,
+                releaseNotesURL: record.releaseNotesURL,
+                message: "Homebrew has a newer cask. Adopt with Homebrew to replace the existing app and manage future updates."
+            )
+        }
+
+        guard isGuidedManualUpdate(record), record.status.countsAsAvailable, !record.canInstall else {
+            return record
+        }
+
+        return AppUpdateRecord(
+            id: record.id,
+            appID: record.appID,
+            appName: record.appName,
+            bundleIdentifier: record.bundleIdentifier,
+            appPath: record.appPath,
+            source: record.source,
+            sourceIdentifier: record.sourceIdentifier,
+            currentVersion: record.currentVersion,
+            availableVersion: record.availableVersion,
+            status: record.status,
+            checkedAt: record.checkedAt,
+            installActionTitle: "Run Guided Update",
+            installActionURL: record.installActionURL,
+            requiresAdmin: record.requiresAdmin,
+            requiresRestart: record.requiresRestart,
+            canInstall: true,
+            isAutoEligible: false,
+            releaseNotesTitle: record.releaseNotesTitle,
+            releaseNotesSummary: record.releaseNotesSummary,
+            releaseNotesURL: record.releaseNotesURL,
+            message: record.message
+        )
+    }
+
+    private func shouldHideUpdateResult(_ result: UpdateItemResult) -> Bool {
+        isObsoleteMacAppStoreSudoFailure(source: result.source, message: result.message)
+            || isObsoleteMacAppStoreBlockingAttempt(source: result.source, message: result.message)
+            || isRetryableHomebrewMissingArtifactFailure(source: result.source, message: result.message)
+            || isRetryableHomebrewFormulaFlagFailure(source: result.source, message: result.message)
+            || isRetryableHomebrewAdoptPromptFailure(source: result.source, sourceIdentifier: result.sourceIdentifier, message: result.message)
+            || isHomebrewAdoptVersionMismatchFailure(source: result.source, sourceIdentifier: result.sourceIdentifier, message: result.message)
+    }
+
+    private func isObsoleteMacAppStoreSudoFailure(_ record: AppUpdateRecord) -> Bool {
+        record.status == .failed && isObsoleteMacAppStoreSudoFailure(source: record.source, message: record.message)
+    }
+
+    private func isObsoleteMacAppStoreSudoFailure(source: AppUpdateSource, message: String?) -> Bool {
+        source == .macAppStore && (message ?? "").localizedCaseInsensitiveContains("Failed to get sudo uid")
+    }
+
+    private func isObsoleteMacAppStoreBlockingAttempt(_ record: AppUpdateRecord) -> Bool {
+        isObsoleteMacAppStoreBlockingAttempt(source: record.source, message: record.message)
+    }
+
+    private func isObsoleteMacAppStoreBlockingAttempt(source: AppUpdateSource, message: String?) -> Bool {
+        source == .macAppStore && (message ?? "").localizedCaseInsensitiveContains("mas could not complete")
+    }
+
+    private func isRetryableHomebrewMissingArtifactFailure(_ record: AppUpdateRecord) -> Bool {
+        record.status == .failed
+            && isRetryableHomebrewMissingArtifactFailure(source: record.source, message: record.message)
+    }
+
+    private func isRetryableHomebrewMissingArtifactFailure(
+        source: AppUpdateSource,
+        message: String?
+    ) -> Bool {
+        let message = message ?? ""
+        return source == .homebrewCask
+            && message.localizedCaseInsensitiveContains("App source")
+            && (message.localizedCaseInsensitiveContains("is not there")
+                || message.localizedCaseInsensitiveContains("does not exist"))
+    }
+
+    private func isRetryableHomebrewFormulaFlagFailure(_ record: AppUpdateRecord) -> Bool {
+        record.status == .failed
+            && isRetryableHomebrewFormulaFlagFailure(source: record.source, message: record.message)
+    }
+
+    private func isRetryableHomebrewFormulaFlagFailure(
+        source: AppUpdateSource,
+        message: String?
+    ) -> Bool {
+        source == .homebrewFormula
+            && (message ?? "").localizedCaseInsensitiveContains("Options --formula and --greedy are mutually exclusive")
+    }
+
+    private func isRetryableHomebrewAdoptPromptFailure(_ record: AppUpdateRecord) -> Bool {
+        record.status == .failed
+            && isRetryableHomebrewAdoptPromptFailure(
+                source: record.source,
+                sourceIdentifier: record.sourceIdentifier,
+                message: record.message
+            )
+    }
+
+    private func isRetryableHomebrewAdoptPromptFailure(
+        source: AppUpdateSource,
+        sourceIdentifier: String,
+        message: String?
+    ) -> Bool {
+        guard source == .homebrewCask,
+              sourceIdentifier.hasPrefix("adopt:") else {
+            return false
+        }
+        let message = message ?? ""
+        return message.localizedCaseInsensitiveContains("terminal is required")
+            || message.localizedCaseInsensitiveContains("askpass helper")
+            || message.localizedCaseInsensitiveContains("a password is required")
+    }
+
+    private func isHomebrewReplaceManualAction(_ record: AppUpdateRecord) -> Bool {
+        record.source == .homebrewCask
+            && record.sourceIdentifier.hasPrefix("replace:")
+            && record.status == .manualAction
+    }
+
+    private func isHomebrewAdoptVersionMismatchFailure(_ record: AppUpdateRecord) -> Bool {
+        record.status == .failed
+            && isHomebrewAdoptVersionMismatchFailure(
+                source: record.source,
+                sourceIdentifier: record.sourceIdentifier,
+                message: record.message
+            )
+    }
+
+    private func isHomebrewAdoptVersionMismatchFailure(
+        source: AppUpdateSource,
+        sourceIdentifier: String,
+        message: String?
+    ) -> Bool {
+        guard source == .homebrewCask,
+              sourceIdentifier.hasPrefix("adopt:") else {
+            return false
+        }
+        let message = message ?? ""
+        return message.localizedCaseInsensitiveContains("existing App is different")
+            || message.localizedCaseInsensitiveContains("bundle short version")
+    }
+
+    private func isGuidedManualUpdate(_ record: AppUpdateRecord) -> Bool {
+        switch record.source {
+        case .directDownload, .metadata, .electron:
+            return true
+        case .macAppStore, .homebrewCask, .homebrewFormula, .appleSoftwareUpdate, .unknown:
+            return false
+        }
     }
 
     private func updateRecordComparator(_ lhs: AppUpdateRecord, _ rhs: AppUpdateRecord) -> Bool {
@@ -2655,12 +3647,124 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func shouldPromptToQuitBeforeUpdate(_ record: AppUpdateRecord) -> Bool {
+        switch record.source {
+        case .directDownload, .metadata, .electron:
+            return false
+        case .macAppStore, .homebrewCask, .homebrewFormula, .appleSoftwareUpdate, .unknown:
+            return true
+        }
+    }
+
     private func applyUpdateResult(_ result: UpdateItemResult) {
         guard let index = updateRecords.firstIndex(where: { $0.id == result.updateID }) else { return }
         updateRecords[index].status = result.status
         updateRecords[index].message = result.message
         updateRecords[index].checkedAt = result.completedAt
         updateRecords[index].isAutoEligible = false
+        removeResolvedUpdateRecordsIfNeeded(after: result, updatedRecord: updateRecords[index])
+    }
+
+    private func removeResolvedUpdateRecordsIfNeeded(after result: UpdateItemResult, updatedRecord: AppUpdateRecord) {
+        guard result.status == .updated || result.status == .needsRestart else { return }
+        let shouldRemoveCompletedRecord = result.status == .updated
+        var removedIDs: Set<String> = []
+        updateRecords.removeAll { record in
+            if record.id == result.updateID {
+                guard shouldRemoveCompletedRecord else { return false }
+                removedIDs.insert(record.id)
+                return true
+            }
+            guard record.status.countsAsAvailable || record.status == .failed || record.status == .skipped || record.status == .updated,
+                  recordsRepresentSameApp(record, updatedRecord) else {
+                return false
+            }
+            removedIDs.insert(record.id)
+            return true
+        }
+        guard !removedIDs.isEmpty else { return }
+        selectedUpdateIDs.subtract(removedIDs)
+        if let focusedUpdateID, removedIDs.contains(focusedUpdateID) {
+            self.focusedUpdateID = nil
+        }
+    }
+
+    private func pruneResolvedUpdateRecords(_ records: [AppUpdateRecord]) -> [AppUpdateRecord] {
+        records.filter { record in
+            record.status != .updated && record.status != .upToDate
+                && !AppUpdateEligibility.isStaleHomebrewManagementRecord(record)
+                && !isResolvedInstalledAppRecord(record)
+        }
+    }
+
+    private func isResolvedInstalledAppRecord(_ record: AppUpdateRecord) -> Bool {
+        return AppUpdateEligibility.isResolvedByInstalledVersion(
+            record,
+            installedVersion: installedVersion(for: record)
+        )
+    }
+
+    private func installedVersion(for record: AppUpdateRecord) -> String? {
+        let matchingRow = rows.first { row in
+            if let appID = record.appID, row.app.id == appID { return true }
+            if let bundleIdentifier = record.bundleIdentifier,
+               row.app.bundleIdentifier == bundleIdentifier {
+                return true
+            }
+            return row.app.path == record.appPath
+        }
+        let candidatePaths = [matchingRow?.app.path, record.appPath]
+            .compactMap { $0 }
+            .reduce(into: [String]()) { paths, path in
+                if !paths.contains(path) { paths.append(path) }
+            }
+
+        for path in candidatePaths {
+            let infoURL = URL(fileURLWithPath: path, isDirectory: true)
+                .appendingPathComponent("Contents/Info.plist", isDirectory: false)
+            guard let data = try? Data(contentsOf: infoURL),
+                  let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
+                  let dictionary = plist as? [String: Any] else {
+                continue
+            }
+            if let version = dictionary["CFBundleShortVersionString"] as? String,
+               !version.isEmpty {
+                return version
+            }
+            if let version = dictionary["CFBundleVersion"] as? String,
+               !version.isEmpty {
+                return version
+            }
+        }
+        return matchingRow?.app.version
+    }
+
+    private func pruneDirectSourceRecordsManagedByHomebrew(_ records: [AppUpdateRecord]) -> [AppUpdateRecord] {
+        let homebrewRecords = records.filter { $0.source == .homebrewCask }
+        guard !homebrewRecords.isEmpty else { return records }
+        return records.filter { record in
+            guard isDirectManagedUpdateSource(record.source) else { return true }
+            return !homebrewRecords.contains { recordsRepresentSameApp(record, $0) }
+        }
+    }
+
+    private func isDirectManagedUpdateSource(_ source: AppUpdateSource) -> Bool {
+        source == .directDownload || source == .electron || source == .metadata
+    }
+
+    private func recordsRepresentSameApp(_ lhs: AppUpdateRecord, _ rhs: AppUpdateRecord) -> Bool {
+        if let lhsAppID = lhs.appID, let rhsAppID = rhs.appID, lhsAppID == rhsAppID {
+            return true
+        }
+        if let lhsPath = lhs.appPath, let rhsPath = rhs.appPath, lhsPath == rhsPath {
+            return true
+        }
+        if let lhsBundleIdentifier = lhs.bundleIdentifier,
+           let rhsBundleIdentifier = rhs.bundleIdentifier,
+           lhsBundleIdentifier == rhsBundleIdentifier {
+            return true
+        }
+        return false
     }
 
     private func changeLogEntries(
@@ -2680,6 +3784,239 @@ final class AppModel: ObservableObject {
             guard record.currentVersion != nil || record.availableVersion != nil || record.releaseNotesSummary != nil || record.releaseNotesURL != nil else { return nil }
             return AppChangeLogEntry.fromUpdateRecord(record, capturedAt: record.checkedAt)
         }
+    }
+
+    private func refreshStoredChangeLogNotes() async {
+        let existingEntries = changeLogEntries
+        guard !existingEntries.isEmpty else { return }
+        let enrichedEntries = await Self.enrichedChangeLogEntries(existingEntries)
+        guard enrichedEntries != existingEntries else { return }
+
+        do {
+            try dataStore.upsertChangeLogEntries(enrichedEntries)
+            changeLogEntries = try dataStore.fetchChangeLogEntries()
+        } catch {
+            lastMessage = "Refreshing change logs failed: \(error.localizedDescription)"
+        }
+    }
+
+    nonisolated private static func enrichedChangeLogEntries(_ entries: [AppChangeLogEntry]) async -> [AppChangeLogEntry] {
+        guard !entries.isEmpty else { return [] }
+        return await withTaskGroup(of: (Int, AppChangeLogEntry).self) { group in
+            for (index, entry) in entries.enumerated() {
+                group.addTask {
+                    (index, await enrichChangeLogEntry(entry))
+                }
+            }
+
+            var enriched = Array<AppChangeLogEntry?>(repeating: nil, count: entries.count)
+            for await (index, entry) in group {
+                enriched[index] = entry
+            }
+            return enriched.compactMap(\.self)
+        }
+    }
+
+    nonisolated private static func enrichChangeLogEntry(_ entry: AppChangeLogEntry) async -> AppChangeLogEntry {
+        let sanitizedEntry = entryWithSummary(entry, summary: sanitizedReleaseNotesSummary(entry.summary))
+        guard let urlString = entry.releaseNotesURL,
+              let url = URL(string: urlString),
+              shouldFetchReleaseNotes(for: sanitizedEntry, from: url) else {
+            return sanitizedEntry
+        }
+
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 8
+            request.setValue("App Monitor release notes fetcher", forHTTPHeaderField: "User-Agent")
+            request.setValue("text/html,text/plain,application/xhtml+xml,application/xml;q=0.8,*/*;q=0.2", forHTTPHeaderField: "Accept")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200..<300).contains(httpResponse.statusCode) else {
+                return sanitizedEntry
+            }
+
+            let limitedData = data.count > 1_500_000 ? Data(data.prefix(1_500_000)) : data
+            let text = String(data: limitedData, encoding: .utf8)
+                ?? String(data: limitedData, encoding: .isoLatin1)
+                ?? String(decoding: limitedData, as: UTF8.self)
+            guard let summary = extractReleaseNotesText(from: text), !summary.isEmpty else {
+                return sanitizedEntry
+            }
+
+            return entryWithSummary(sanitizedEntry, summary: summary)
+        } catch {
+            return sanitizedEntry
+        }
+    }
+
+    nonisolated private static func shouldFetchReleaseNotes(for entry: AppChangeLogEntry, from url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return false
+        }
+        let archiveExtensions: Set<String> = ["dmg", "pkg", "zip", "tbz", "tgz", "gz", "bz2", "xz"]
+        guard !archiveExtensions.contains(url.pathExtension.lowercased()) else {
+            return false
+        }
+        if url.host?.localizedCaseInsensitiveContains("formulae.brew.sh") == true {
+            return false
+        }
+        if entry.source == .directDownload || entry.source == .electron {
+            return true
+        }
+        if entry.source == .metadata,
+           url.path.localizedCaseInsensitiveContains("/releases") {
+            return true
+        }
+        return releaseNotesSummaryNeedsEnrichment(entry.summary)
+    }
+
+    nonisolated private static func entryWithSummary(_ entry: AppChangeLogEntry, summary: String) -> AppChangeLogEntry {
+        AppChangeLogEntry(
+            id: entry.id,
+            appID: entry.appID,
+            appName: entry.appName,
+            bundleIdentifier: entry.bundleIdentifier,
+            appPath: entry.appPath,
+            source: entry.source,
+            sourceIdentifier: entry.sourceIdentifier,
+            fromVersion: entry.fromVersion,
+            toVersion: entry.toVersion,
+            title: entry.title,
+            summary: summary,
+            releaseNotesURL: entry.releaseNotesURL,
+            updateRunID: entry.updateRunID,
+            updateResultID: entry.updateResultID,
+            capturedAt: entry.capturedAt
+        )
+    }
+
+    nonisolated private static func sanitizedReleaseNotesSummary(_ summary: String) -> String {
+        if releaseNotesSummaryNeedsHTMLCleanup(summary),
+           let extracted = extractReleaseNotesText(from: summary),
+           !extracted.isEmpty {
+            return extracted
+        }
+        return decodeHTMLEntities(summary)
+            .replacingOccurrences(of: "\u{00a0}", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    nonisolated private static func releaseNotesSummaryNeedsHTMLCleanup(_ summary: String) -> Bool {
+        summary.range(of: #"<[A-Za-z][^>]*>"#, options: .regularExpression) != nil
+            || summary.contains("&nbsp;")
+            || summary.contains("&amp;")
+            || summary.contains("&lt;")
+            || summary.contains("&#")
+    }
+
+    nonisolated private static func releaseNotesSummaryNeedsEnrichment(_ summary: String) -> Bool {
+        if releaseNotesSummaryNeedsHTMLCleanup(summary) {
+            return true
+        }
+        let lowercased = summary.lowercased()
+        return lowercased.contains("release notes were not available")
+            || lowercased.contains("open the app or vendor link")
+            || lowercased.contains("metadata reports an update")
+            || lowercased.contains("update metadata reports an update")
+            || lowercased.contains("could not read the latest release notes")
+    }
+
+    nonisolated private static func extractReleaseNotesText(from rawText: String) -> String? {
+        var text = rawText
+        if let main = firstCapturedGroup(in: text, pattern: #"<(?:main|article)\b[^>]*>(.*?)</(?:main|article)>"#, options: [.caseInsensitive, .dotMatchesLineSeparators])
+            ?? firstCapturedGroup(in: text, pattern: #"<body\b[^>]*>(.*?)</body>"#, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+            text = main
+        }
+
+        text = replacePattern(#"<(script|style|svg|noscript)\b[^>]*>.*?</\1>"#, in: text, with: " ", options: [.caseInsensitive, .dotMatchesLineSeparators])
+        text = replacePattern(#"<br\s*/?>"#, in: text, with: "\n", options: [.caseInsensitive])
+        text = replacePattern(#"</(p|div|li|h[1-6]|tr|section|article|ul|ol)>"#, in: text, with: "\n", options: [.caseInsensitive])
+        text = replacePattern(#"<[^>]+>"#, in: text, with: " ", options: [.dotMatchesLineSeparators])
+        text = decodeHTMLEntities(text)
+            .replacingOccurrences(of: "\u{00a0}", with: " ")
+
+        var seen: Set<String> = []
+        let lines = text
+            .components(separatedBy: .newlines)
+            .map { replacePattern(#"\s+"#, in: $0, with: " ") }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { line in
+                let key = line.lowercased()
+                guard !seen.contains(key) else { return false }
+                seen.insert(key)
+                return true
+            }
+
+        let joined = lines.joined(separator: "\n")
+        guard !joined.isEmpty else { return nil }
+        return String(joined.prefix(2_400))
+    }
+
+    nonisolated private static func firstCapturedGroup(
+        in value: String,
+        pattern: String,
+        options: NSRegularExpression.Options = []
+    ) -> String? {
+        guard let expression = try? NSRegularExpression(pattern: pattern, options: options) else { return nil }
+        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+        guard let match = expression.firstMatch(in: value, range: range),
+              match.numberOfRanges > 1,
+              let captureRange = Range(match.range(at: 1), in: value) else {
+            return nil
+        }
+        return String(value[captureRange])
+    }
+
+    nonisolated private static func replacePattern(
+        _ pattern: String,
+        in value: String,
+        with replacement: String,
+        options: NSRegularExpression.Options = []
+    ) -> String {
+        guard let expression = try? NSRegularExpression(pattern: pattern, options: options) else { return value }
+        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+        return expression.stringByReplacingMatches(in: value, range: range, withTemplate: replacement)
+    }
+
+    nonisolated private static func decodeHTMLEntities(_ value: String) -> String {
+        var decoded = value
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&apos;", with: "'")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&ndash;", with: "-")
+            .replacingOccurrences(of: "&mdash;", with: "-")
+            .replacingOccurrences(of: "&hellip;", with: "...")
+
+        guard let expression = try? NSRegularExpression(pattern: #"&#(x?[0-9A-Fa-f]+);"#) else {
+            return decoded
+        }
+        let matches = expression.matches(in: decoded, range: NSRange(decoded.startIndex..<decoded.endIndex, in: decoded))
+        for match in matches.reversed() {
+            guard let fullRange = Range(match.range(at: 0), in: decoded),
+                  let valueRange = Range(match.range(at: 1), in: decoded) else {
+                continue
+            }
+            let rawValue = String(decoded[valueRange])
+            let scalarValue: UInt32?
+            if rawValue.lowercased().hasPrefix("x") {
+                scalarValue = UInt32(rawValue.dropFirst(), radix: 16)
+            } else {
+                scalarValue = UInt32(rawValue, radix: 10)
+            }
+            guard let scalarValue,
+                  let scalar = UnicodeScalar(scalarValue) else {
+                continue
+            }
+            decoded.replaceSubrange(fullRange, with: String(scalar))
+        }
+        return decoded
     }
 
     private func promptIfAppIsRunningForUpdate(_ app: MonitoredApp) async -> Bool {
@@ -2809,9 +4146,30 @@ final class AppModel: ObservableObject {
     private func persistUpdateSettings() {
         do {
             try dataStore.saveUpdateSettings(updateSettings)
-            updateRecords = updateRecords.map(recordWithCurrentAutoEligibility)
+            updateRecords = pruneResolvedUpdateRecords(
+                pruneDirectSourceRecordsManagedByHomebrew(
+                    updateRecords.map(recordWithCurrentAutoEligibility)
+                )
+            )
         } catch {
             lastMessage = "Saving update settings failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func nextAppMonitorUpdateCheckDate(from date: Date = Date()) -> Date {
+        date.addingTimeInterval(TimeInterval(max(1, appMonitorUpdateCadenceHours) * 3600))
+    }
+
+    private func updateNextAppMonitorUpdateCheck(from date: Date = Date()) {
+        appMonitorUpdateNextCheckAt = appMonitorUpdateChecksEnabled ? nextAppMonitorUpdateCheckDate(from: date) : nil
+        persistAppMonitorUpdateNextCheckAt()
+    }
+
+    private func persistAppMonitorUpdateNextCheckAt() {
+        if let appMonitorUpdateNextCheckAt {
+            UserDefaults.standard.set(appMonitorUpdateNextCheckAt, forKey: Self.appMonitorUpdateNextCheckAtKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.appMonitorUpdateNextCheckAtKey)
         }
     }
 
@@ -2856,6 +4214,28 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func startAppMonitorUpdateScheduler() {
+        appMonitorUpdateSchedulerTimer?.invalidate()
+        guard appMonitorUpdateChecksEnabled else { return }
+        if appMonitorUpdateNextCheckAt == nil {
+            appMonitorUpdateNextCheckAt = nextAppMonitorUpdateCheckDate()
+            persistAppMonitorUpdateNextCheckAt()
+        }
+        appMonitorUpdateSchedulerTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self,
+                      let nextCheckAt = self.appMonitorUpdateNextCheckAt,
+                      nextCheckAt <= Date(),
+                      !self.isCheckingAppMonitorUpdate,
+                      !self.isInstallingAppMonitorUpdate
+                else {
+                    return
+                }
+                await self.checkForAppMonitorUpdate(installIfAvailable: self.appMonitorAutomaticUpdatesEnabled)
+            }
+        }
+    }
+
     private func passesInfrastructureFilters(_ row: AppUsageRow) -> Bool {
         if ignoredAppIDs.contains(row.app.id), !includeIgnoredApps {
             return false
@@ -2878,6 +4258,9 @@ final class AppModel: ObservableObject {
         if filterState.minimumStorageBytes > 0, row.totalSizeBytes < filterState.minimumStorageBytes {
             return false
         }
+        if !passesUsageTimeFilter(row) {
+            return false
+        }
 
         switch filterState.dateRange {
         case .any:
@@ -2891,6 +4274,23 @@ final class AppModel: ObservableObject {
         case .unused90Days:
             guard let lastSeen = row.lastSeen else { return true }
             return lastSeen < Date().addingTimeInterval(-90 * 24 * 60 * 60)
+        }
+    }
+
+    private func passesUsageTimeFilter(_ row: AppUsageRow) -> Bool {
+        switch filterState.usageTime {
+        case .any:
+            return true
+        case .none:
+            return row.usageSeconds <= 0
+        case .atLeast15Minutes:
+            return row.usageSeconds >= 15 * 60
+        case .atLeast1Hour:
+            return row.usageSeconds >= 60 * 60
+        case .atLeast4Hours:
+            return row.usageSeconds >= 4 * 60 * 60
+        case .atLeast8Hours:
+            return row.usageSeconds >= 8 * 60 * 60
         }
     }
 
@@ -2914,6 +4314,7 @@ final class AppModel: ObservableObject {
         }
         selectedAppID = visibleRows.first?.app.id
         selectedTimelineSession = nil
+        focusedUpdateID = nil
         refreshSelectedDailyRows()
     }
 

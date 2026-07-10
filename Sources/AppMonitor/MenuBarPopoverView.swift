@@ -80,9 +80,9 @@ struct MenuBarPopoverView: View {
                 .fill(.ultraThinMaterial)
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.white.opacity(0.56), lineWidth: 1)
+                        .stroke(MenuBarTheme.popoverStroke, lineWidth: 1)
                 )
-                .shadow(color: Color.black.opacity(0.20), radius: 24, y: 16)
+                .shadow(color: MenuBarTheme.popoverShadow, radius: 24, y: 16)
         )
         .padding(1)
         .task {
@@ -391,19 +391,23 @@ struct MenuBarPopoverView: View {
 }
 
 private enum MenuBarTheme {
-    static let primaryText = Color(red: 0.065, green: 0.075, blue: 0.11)
-    static let secondaryText = Color(red: 0.33, green: 0.36, blue: 0.45)
-    static let mutedText = Color(red: 0.46, green: 0.49, blue: 0.58)
-    static let sectionFill = Color.white.opacity(0.48)
-    static let cardFill = Color.white.opacity(0.62)
-    static let hairline = Color.black.opacity(0.075)
-    static let track = Color(red: 0.84, green: 0.86, blue: 0.91).opacity(0.74)
-    static let accent = Color(red: 0.40, green: 0.31, blue: 0.90)
-    static let blue = Color(red: 0.12, green: 0.50, blue: 0.94)
-    static let green = Color(red: 0.19, green: 0.65, blue: 0.38)
-    static let orange = Color(red: 0.93, green: 0.48, blue: 0.03)
-    static let warning = Color(red: 0.98, green: 0.63, blue: 0.10)
-    static let free = Color(red: 0.70, green: 0.72, blue: 0.79)
+    static let primaryText = Color.appMonitor(light: .init(0.065, 0.075, 0.11), dark: .init(0.92, 0.935, 0.965))
+    static let secondaryText = Color.appMonitor(light: .init(0.33, 0.36, 0.45), dark: .init(0.66, 0.70, 0.78))
+    static let mutedText = Color.appMonitor(light: .init(0.46, 0.49, 0.58), dark: .init(0.55, 0.59, 0.68))
+    static let sectionFill = Color.appMonitor(light: .init(1, 1, 1, 0.48), dark: .init(0.13, 0.145, 0.18, 0.70))
+    static let cardFill = Color.appMonitor(light: .init(1, 1, 1, 0.62), dark: .init(0.17, 0.182, 0.225, 0.78))
+    static let iconButtonFill = Color.appMonitor(light: .init(1, 1, 1, 0.40), dark: .init(0.18, 0.194, 0.238, 0.84))
+    static let iconButtonPressedFill = Color.appMonitor(light: .init(0, 0, 0, 0.10), dark: .init(1, 1, 1, 0.10))
+    static let hairline = Color.appMonitor(light: .init(0, 0, 0, 0.075), dark: .init(1, 1, 1, 0.10))
+    static let popoverStroke = Color.appMonitor(light: .init(1, 1, 1, 0.56), dark: .init(1, 1, 1, 0.12))
+    static let popoverShadow = Color.appMonitor(light: .init(0, 0, 0, 0.20), dark: .init(0, 0, 0, 0.45))
+    static let track = Color.appMonitor(light: .init(0.84, 0.86, 0.91, 0.74), dark: .init(1, 1, 1, 0.12))
+    static let accent = Color.appMonitor(light: .init(0.40, 0.31, 0.90), dark: .init(0.64, 0.57, 1))
+    static let blue = Color.appMonitor(light: .init(0.12, 0.50, 0.94), dark: .init(0.34, 0.66, 1))
+    static let green = Color.appMonitor(light: .init(0.19, 0.65, 0.38), dark: .init(0.34, 0.82, 0.52))
+    static let orange = Color.appMonitor(light: .init(0.93, 0.48, 0.03), dark: .init(1, 0.62, 0.22))
+    static let warning = Color.appMonitor(light: .init(0.98, 0.63, 0.10), dark: .init(1, 0.72, 0.24))
+    static let free = Color.appMonitor(light: .init(0.70, 0.72, 0.79), dark: .init(0.38, 0.42, 0.51))
 }
 
 private struct AppMonitorMark: View {
@@ -697,7 +701,7 @@ private struct MenuBarIconButtonStyle: ButtonStyle {
             .foregroundStyle(MenuBarTheme.primaryText)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(configuration.isPressed ? Color.black.opacity(0.10) : Color.white.opacity(0.40))
+                    .fill(configuration.isPressed ? MenuBarTheme.iconButtonPressedFill : MenuBarTheme.iconButtonFill)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)

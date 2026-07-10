@@ -81,6 +81,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
         let controller = NSHostingController(rootView: rootView(for: model))
         controller.view.frame = NSRect(x: 0, y: 0, width: 542, height: 620)
+        controller.view.appearance = model.appearancePreference.nsAppearance
 
         let popover = NSPopover()
         popover.behavior = .transient
@@ -97,6 +98,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private func refreshPopoverContent() {
         guard let model else { return }
         hostingController?.rootView = rootView(for: model)
+        hostingController?.view.appearance = model.appearancePreference.nsAppearance
     }
 
     private func updateStatusItemInteraction() {
@@ -122,6 +124,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 self?.openDashboardAction?()
             }
             .environmentObject(model)
+            .preferredColorScheme(model.appearancePreference.colorScheme)
         )
     }
 }
@@ -141,6 +144,9 @@ struct MenuBarInstaller: View {
                 configure()
             }
             .onChange(of: model.potentialSavingsBytes) {
+                configure()
+            }
+            .onChange(of: model.appearancePreference) {
                 configure()
             }
     }

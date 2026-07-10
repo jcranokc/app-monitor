@@ -9,7 +9,8 @@ let package = Package(
     ],
     products: [
         .library(name: "AppMonitorCore", targets: ["AppMonitorCore"]),
-        .executable(name: "AppMonitor", targets: ["AppMonitor"])
+        .executable(name: "AppMonitor", targets: ["AppMonitor"]),
+        .executable(name: "AppMonitorAskpass", targets: ["AppMonitorAskpass"])
     ],
     targets: [
         .systemLibrary(
@@ -26,6 +27,9 @@ let package = Package(
             resources: [
                 .process("Resources")
             ]
+        ),
+        .executableTarget(
+            name: "AppMonitorAskpass"
         ),
         .testTarget(
             name: "AppMonitorCoreTests",
