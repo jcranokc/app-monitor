@@ -237,6 +237,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var timelineHourBuckets: [TimelineHourBucket] = []
     @Published var selectedAppID: String?
     @Published var selectedTimelineSession: TimelineSession?
+    @Published var isInspectorVisible = false
     @Published var selectedStorageItems: [StorageScanItem] = []
     @Published var isLoadingInventory = false
     @Published var isScanningStorage = false
@@ -253,7 +254,13 @@ final class AppModel: ObservableObject {
     @Published var updateRecords: [AppUpdateRecord] = []
     @Published var updateListFilter: UpdateListFilter?
     @Published var selectedUpdateIDs: Set<String> = []
-    @Published var focusedUpdateID: String?
+    @Published var focusedUpdateID: String? {
+        didSet {
+            if focusedUpdateID != nil {
+                isInspectorVisible = true
+            }
+        }
+    }
     @Published var updateSettings = AppUpdateSettings()
     @Published var appMonitorUpdateRecord: AppUpdateRecord?
     @Published var appMonitorUpdateItem: SparkleAppcastItem?
@@ -298,7 +305,13 @@ final class AppModel: ObservableObject {
     @Published var cleanupSuggestions: [CleanupSuggestion] = []
     @Published var cleanupSuggestionFilter: CleanupSuggestionFilter = .all
     @Published var cleanupSuggestionSort: CleanupSuggestionSort = .size
-    @Published var focusedCleanupSuggestionID: String?
+    @Published var focusedCleanupSuggestionID: String? {
+        didSet {
+            if focusedCleanupSuggestionID != nil {
+                isInspectorVisible = true
+            }
+        }
+    }
     @Published var largeFiles: [LargeFileRecord] = []
     @Published private(set) var allStorageItems: [StorageScanItem] = []
     @Published private(set) var warningItems: [AppWarningItem] = []
@@ -310,7 +323,13 @@ final class AppModel: ObservableObject {
     }
     @Published var scanSchedule = AppScanSchedule()
     @Published var actionHistory: [(Date, String, String)] = []
-    @Published var selectedHistoryActionID: String?
+    @Published var selectedHistoryActionID: String? {
+        didSet {
+            if selectedHistoryActionID != nil {
+                isInspectorVisible = true
+            }
+        }
+    }
     @Published var searchFocusToken = UUID()
 
     let tracker: UsageTracker
@@ -458,6 +477,21 @@ final class AppModel: ObservableObject {
             return fallbackUsageRow(from: focusedUpdateRecord)
         }
         return displayedRows.first
+    }
+
+    var hasInspectorContent: Bool {
+        switch destination {
+        case .overview, .usageTrends, .settings:
+            return false
+        case .updates:
+            return focusedUpdateID != nil
+        case .cleanup:
+            return focusedCleanupSuggestion != nil
+        case .history:
+            return selectedHistoryActionID != nil
+        case .storage, .largeFiles, .usageTable, .activityTimeline, .warnings:
+            return selectedRow != nil
+        }
     }
 
     var totalUsageSeconds: TimeInterval {
@@ -1415,6 +1449,7 @@ final class AppModel: ObservableObject {
         selectedTimelineSession = nil
         focusedUpdateID = nil
         selectedAppID = row.app.id
+        isInspectorVisible = true
         refreshSelectedDailyRows()
         loadSelectedStorageItems()
     }
@@ -1424,6 +1459,7 @@ final class AppModel: ObservableObject {
         focusedUpdateID = nil
         selectedWarningID = warning.id
         selectedAppID = warning.appID
+        isInspectorVisible = true
         refreshSelectedDailyRows()
         loadSelectedStorageItems()
         lastMessage = "Selected warning: \(warning.title)"
@@ -1451,6 +1487,7 @@ final class AppModel: ObservableObject {
         selectedTimelineSession = nil
         focusedUpdateID = nil
         selectedAppID = appID
+        isInspectorVisible = true
         refreshSelectedDailyRows()
         loadSelectedStorageItems()
     }
@@ -1459,6 +1496,7 @@ final class AppModel: ObservableObject {
         focusedUpdateID = nil
         selectedTimelineSession = session
         selectedAppID = session.appID
+        isInspectorVisible = true
         refreshSelectedDailyRows()
         loadSelectedStorageItems()
     }
@@ -1633,11 +1671,13 @@ final class AppModel: ObservableObject {
 
     func navigate(_ destination: DashboardDestination) {
         self.destination = destination
+        isInspectorVisible = false
     }
 
     func showUpdates(filter: UpdateListFilter? = nil) {
         updateListFilter = filter
         destination = .updates
+        isInspectorVisible = false
         let count = filteredAvailableUpdateCount
         let scope = filter.map { " \(String($0.title).lowercased())" } ?? ""
         lastMessage = count == 0 ? "No\(scope) installed app updates loaded" : "Showing \(count)\(scope) installed app update\(count == 1 ? "" : "s")"
@@ -1645,6 +1685,7 @@ final class AppModel: ObservableObject {
 
     func showAppList(_ filter: AppListQuickFilter) {
         destination = .usageTable
+        isInspectorVisible = false
         appListQuickFilter = filter
         selectedTimelineSession = nil
         focusedUpdateID = nil
@@ -1661,6 +1702,7 @@ final class AppModel: ObservableObject {
 
     func showStorageExplorer() {
         destination = .storage
+        isInspectorVisible = false
     }
 
     func saveCurrentFilter() {
@@ -2274,10 +2316,21 @@ final class AppModel: ObservableObject {
         if #available(macOS 13.0, *) {
             let status = SMAppService.mainApp.status
             loginItemEnabled = status == .enabled
-            loginItemStatus = String(describing: status)
+            switch status {
+            case .enabled:
+                loginItemStatus = "Enabled"
+            case .notRegistered:
+                loginItemStatus = "Off"
+            case .requiresApproval:
+                loginItemStatus = "Needs approval in System Settings"
+            case .notFound:
+                loginItemStatus = "Unavailable"
+            @unknown default:
+                loginItemStatus = "Unavailable"
+            }
         } else {
             loginItemEnabled = false
-            loginItemStatus = "Unsupported"
+            loginItemStatus = "Requires macOS 13 or newer"
         }
     }
 

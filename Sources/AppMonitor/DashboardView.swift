@@ -15,14 +15,18 @@ struct DashboardView: View {
                     DashboardMainView()
                         .frame(minWidth: 680, maxWidth: .infinity, maxHeight: .infinity)
 
-                    Divider()
-                        .opacity(0.55)
+                    if model.isInspectorVisible, model.hasInspectorContent {
+                        Divider()
+                            .opacity(0.55)
 
-                    DashboardDetailPanel()
-                        .frame(width: detailWidth(for: geometry.size.width))
-                        .frame(maxHeight: .infinity)
+                        DashboardDetailPanel()
+                            .frame(width: detailWidth(for: geometry.size.width))
+                            .frame(maxHeight: .infinity)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
                 }
                 .background(DashboardTheme.canvas)
+                .animation(.easeInOut(duration: 0.18), value: model.isInspectorVisible)
             }
         }
         .sheet(item: $model.uninstallPlan) { plan in
@@ -83,6 +87,7 @@ private struct AppMonitorLogoMark: View {
 
 private struct SidebarView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var showsUpdateSources = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -110,7 +115,7 @@ private struct SidebarView: View {
                             model.showUpdates(filter: .apps)
                         } label: {
                             SidebarMetricItem(
-                                title: "Apps",
+                                title: "App Updates",
                                 systemImage: "square.grid.2x2",
                                 value: countText(appUpdateCount),
                                 badgeColor: DashboardTheme.blue.opacity(0.14),
@@ -124,7 +129,7 @@ private struct SidebarView: View {
                             model.showUpdates(filter: .packages)
                         } label: {
                             SidebarMetricItem(
-                                title: "Packages",
+                                title: "Package Updates",
                                 systemImage: "terminal",
                                 value: countText(packageUpdateCount),
                                 badgeColor: DashboardTheme.blue.opacity(0.14),
@@ -135,12 +140,12 @@ private struct SidebarView: View {
                         .buttonStyle(.plain)
                     }
 
-                    SidebarGroup(title: "Installed") {
+                    SidebarGroup(title: "Library") {
                         Button {
                             model.showAppList(.all)
                         } label: {
                             SidebarMetricItem(
-                                title: "Apps",
+                                title: "All Apps",
                                 systemImage: "square.grid.2x2",
                                 value: "\(model.rowCount(for: .all))",
                                 isSelected: isAppListSelected(.all)
@@ -151,7 +156,7 @@ private struct SidebarView: View {
                             model.showUpdates(filter: .adoptable)
                         } label: {
                             SidebarMetricItem(
-                                title: "Adoptable",
+                                title: "Adopt with Homebrew",
                                 systemImage: "shippingbox",
                                 value: countText(model.adoptableUpdateCount),
                                 isSelected: isUpdateFilterSelected(.adoptable)
@@ -173,7 +178,7 @@ private struct SidebarView: View {
                             model.showAppList(.neverUsed)
                         } label: {
                             SidebarMetricItem(
-                                title: "Unused",
+                                title: "Unused Apps",
                                 systemImage: "clock.badge.questionmark",
                                 value: "\(model.rowCount(for: .neverUsed))",
                                 isSelected: isAppListSelected(.neverUsed)
@@ -184,7 +189,7 @@ private struct SidebarView: View {
                             model.showAppList(.systemApps)
                         } label: {
                             SidebarMetricItem(
-                                title: "System",
+                                title: "System Apps",
                                 systemImage: "gearshape",
                                 value: "\(model.rowCount(for: .systemApps))",
                                 isSelected: isAppListSelected(.systemApps)
@@ -193,54 +198,45 @@ private struct SidebarView: View {
                         .buttonStyle(.plain)
                     }
 
-                    SidebarGroup(title: "Sources") {
-                        Button {
-                            model.showUpdates(filter: .apps)
-                        } label: {
-                            SidebarSourceParentItem(
-                                title: "Apps",
-                                systemImage: "square.grid.2x2",
-                                value: countText(appSourceUpdateCount),
-                                isSelected: isUpdateFilterSelected(.apps)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        ForEach(appSourceRows) { row in
-                            Button {
-                                model.showUpdates(filter: row.filter)
-                            } label: {
-                                SidebarSourceItem(
-                                    title: row.title,
-                                    systemImage: row.systemImage,
-                                    value: countText(row.count),
-                                    isSelected: isUpdateFilterSelected(row.filter)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
+                    SidebarGroup(title: "Update Sources") {
+                        DisclosureGroup(isExpanded: $showsUpdateSources) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(appSourceRows) { row in
+                                    Button {
+                                        model.showUpdates(filter: row.filter)
+                                    } label: {
+                                        SidebarSourceItem(
+                                            title: row.title,
+                                            systemImage: row.systemImage,
+                                            value: countText(row.count),
+                                            isSelected: isUpdateFilterSelected(row.filter)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
 
-                        Button {
-                            model.showUpdates(filter: .packages)
+                                Button {
+                                    model.showUpdates(filter: .source(.homebrewFormula))
+                                } label: {
+                                    SidebarSourceItem(
+                                        title: "Homebrew Formulae",
+                                        systemImage: "terminal",
+                                        value: countText(packageUpdateCount),
+                                        isSelected: isUpdateFilterSelected(.source(.homebrewFormula))
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.top, 4)
                         } label: {
                             SidebarSourceParentItem(
-                                title: "Packages",
-                                systemImage: "terminal",
-                                value: countText(packageUpdateCount),
-                                isSelected: isUpdateFilterSelected(.packages)
+                                title: "Browse by Source",
+                                systemImage: "line.3.horizontal.decrease.circle",
+                                value: countText(appSourceUpdateCount + packageUpdateCount),
+                                isSelected: false
                             )
                         }
-                        .buttonStyle(.plain)
-                        Button {
-                            model.showUpdates(filter: .source(.homebrewFormula))
-                        } label: {
-                            SidebarSourceItem(
-                                title: "Homebrew",
-                                systemImage: "shippingbox",
-                                value: countText(packageUpdateCount),
-                                isSelected: isUpdateFilterSelected(.source(.homebrewFormula))
-                            )
-                        }
-                        .buttonStyle(.plain)
+                        .tint(DashboardTheme.secondaryText)
                     }
 
                     SidebarGroup(title: "Storage") {
@@ -292,20 +288,28 @@ private struct SidebarView: View {
                             SidebarMetricItem(title: "History", systemImage: "clock.arrow.circlepath", value: "", isSelected: model.destination == .history)
                         }
                         .buttonStyle(.plain)
-                        Button {
-                            model.navigate(.settings)
-                        } label: {
-                            SidebarMetricItem(title: "Settings", systemImage: "gearshape", value: "", isSelected: model.destination == .settings)
-                        }
-                        .buttonStyle(.plain)
                     }
-
-                    ScanStatusCard(lastScan: lastScanDate, nextScan: model.scanSchedule.nextScanAt)
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 20)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+
+            Divider()
+                .opacity(0.5)
+
+            VStack(spacing: 10) {
+                Button {
+                    model.navigate(.settings)
+                } label: {
+                    SidebarMetricItem(title: "Settings", systemImage: "gearshape", value: "", isSelected: model.destination == .settings)
+                }
+                .buttonStyle(.plain)
+
+                ScanStatusCard(lastScan: lastScanDate, nextScan: model.scanSchedule.nextScanAt)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
@@ -4885,13 +4889,13 @@ private struct SettingsScreen: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ScreenHeader(title: "Settings", subtitle: "Appearance, background cadence, saved filters, and launch behavior")
+            ScreenHeader(title: "Settings", subtitle: "Choose how App Monitor looks, scans, and keeps software current.")
                 .padding(.top, 6)
 
             DashboardCard {
                 VStack(alignment: .leading, spacing: 16) {
+                    SettingsSectionHeader(title: "General", systemImage: "slider.horizontal.3")
                     AppearanceSettingsSection()
-                    Divider()
                     Toggle("Launch App Monitor at login", isOn: Binding(
                         get: { model.loginItemEnabled },
                         set: { model.setLoginItemEnabled($0) }
@@ -4904,6 +4908,10 @@ private struct SettingsScreen: View {
                         .font(.caption)
                         .foregroundStyle(DashboardTheme.secondaryText)
                     Divider()
+                    SettingsSectionHeader(title: "Full Scan Schedule", systemImage: "arrow.triangle.2.circlepath")
+                    Text("Full scans refresh app inventory, storage use, warnings, and cleanup suggestions.")
+                        .font(.caption)
+                        .foregroundStyle(DashboardTheme.secondaryText)
                     Toggle("Enable recurring full scan", isOn: Binding(
                         get: { model.scanSchedule.isEnabled },
                         set: { model.updateScanSchedule(enabled: $0) }
@@ -4918,11 +4926,14 @@ private struct SettingsScreen: View {
                         Text("Weekly").tag(168)
                     }
                     .pickerStyle(.segmented)
-                    DashboardDetailLine(title: "Next Scan", value: AppMonitorFormatting.shortDateTime(model.scanSchedule.nextScanAt))
-                    DashboardDetailLine(title: "Login Item Status", value: model.loginItemStatus)
+                    DashboardDetailLine(title: "Next Full Scan", value: AppMonitorFormatting.shortDateTime(model.scanSchedule.nextScanAt))
+                    DashboardDetailLine(title: "Launch at Login", value: model.loginItemStatus)
                     Toggle("Show ignored apps in tables", isOn: $model.includeIgnoredApps)
                     Divider()
-                    SettingsSectionHeader(title: "App Monitor Updates", systemImage: "app.badge")
+                    SettingsSectionHeader(title: "Update App Monitor", systemImage: "app.badge")
+                    Text("Controls updates for App Monitor itself.")
+                        .font(.caption)
+                        .foregroundStyle(DashboardTheme.secondaryText)
                     Toggle("Automatically check for App Monitor updates", isOn: Binding(
                         get: { model.appMonitorUpdateChecksEnabled },
                         set: { model.updateAppMonitorUpdateSchedule(enabled: $0) }
@@ -4931,7 +4942,7 @@ private struct SettingsScreen: View {
                         get: { model.appMonitorAutomaticUpdatesEnabled },
                         set: { model.updateAppMonitorAutomaticUpdates(enabled: $0) }
                     ))
-                    Picker("App Monitor cadence", selection: Binding(
+                    Picker("Check cadence", selection: Binding(
                         get: { model.appMonitorUpdateCadenceHours },
                         set: { model.updateAppMonitorUpdateSchedule(cadenceHours: $0) }
                     )) {
@@ -4967,7 +4978,10 @@ private struct SettingsScreen: View {
                         .disabled(model.isInstallingAppMonitorUpdate || model.isCheckingAppMonitorUpdate)
                     }
                     Divider()
-                    SettingsSectionHeader(title: "Installed App Update Discovery", systemImage: "square.stack.3d.up")
+                    SettingsSectionHeader(title: "Update Installed Software", systemImage: "square.stack.3d.up")
+                    Text("Checks apps, Homebrew packages, macOS, Safari, and supported direct-download feeds.")
+                        .font(.caption)
+                        .foregroundStyle(DashboardTheme.secondaryText)
                     Toggle("Enable scheduled installed-app checks", isOn: Binding(
                         get: { model.updateSettings.scheduledChecksEnabled },
                         set: { model.updateUpdateSchedule(enabled: $0) }
@@ -4976,7 +4990,7 @@ private struct SettingsScreen: View {
                         get: { model.updateSettings.automaticUpdatesEnabled },
                         set: { model.updateAutomaticUpdates(enabled: $0) }
                     ))
-                    Picker("Installed app cadence", selection: Binding(
+                    Picker("Check cadence", selection: Binding(
                         get: { model.updateSettings.cadenceHours },
                         set: { model.updateUpdateSchedule(cadenceHours: $0) }
                     )) {
@@ -5761,9 +5775,9 @@ private struct DashboardToolbar: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 14) {
+            HStack(spacing: 10) {
                 SearchField(text: $model.searchText, focusToken: model.searchFocusToken)
-                    .frame(width: 285)
+                    .frame(width: 240)
 
                 Spacer()
 
@@ -5789,7 +5803,8 @@ private struct DashboardToolbar: View {
                     ToolbarControl(
                         title: model.destination == .cleanup ? "This Mac" : model.period.rawValue,
                         systemImage: model.destination == .cleanup ? "desktopcomputer" : "calendar",
-                        trailingSystemImage: "chevron.down"
+                        trailingSystemImage: "chevron.down",
+                        compact: true
                     )
                 }
                 .menuStyle(.button)
@@ -5879,49 +5894,47 @@ private struct DashboardToolbar: View {
                         model.sortKey = .app
                         model.sortAscending = true
                     }
+                    if model.destination != .cleanup {
+                        Divider()
+                        Menu("Export") {
+                            Button("Summary CSV") {
+                                model.exportUsageSummary()
+                            }
+                            Button("Trend Buckets CSV") {
+                                model.exportUsageTrendBuckets()
+                            }
+                            Button("Top Apps CSV") {
+                                model.exportTopApps()
+                            }
+                            Button("Heatmap CSV") {
+                                model.exportUsageHeatmap()
+                            }
+                            Divider()
+                            Button("Current App Table CSV") {
+                                model.exportCurrentRows()
+                            }
+                        }
+                    }
                 } label: {
-                    ToolbarControl(title: "Filter", systemImage: "line.3.horizontal.decrease")
+                    ToolbarControl(title: "Options", systemImage: "slider.horizontal.3", compact: true)
                 }
                 .menuStyle(.button)
                 .buttonStyle(.plain)
 
                 if model.destination != .cleanup {
-                    Menu {
-                        Button("Summary CSV") {
-                            model.exportUsageSummary()
-                        }
-                        Button("Trend Buckets CSV") {
-                            model.exportUsageTrendBuckets()
-                        }
-                        Button("Top Apps CSV") {
-                            model.exportTopApps()
-                        }
-                        Button("Heatmap CSV") {
-                            model.exportUsageHeatmap()
-                        }
-                        Divider()
-                        Button("Current App Table CSV") {
-                            model.exportCurrentRows()
-                        }
+                    Button {
+                        Task { await model.runFullScan() }
                     } label: {
-                        ToolbarControl(title: "Export", systemImage: "square.and.arrow.down")
+                        ToolbarControl(title: model.isScanningStorage ? "Scanning" : "Scan", systemImage: "arrow.clockwise", compact: true)
                     }
-                    .menuStyle(.button)
                     .buttonStyle(.plain)
+                    .disabled(model.isScanningStorage)
                 }
-
-                Button {
-                    Task { await model.runFullScan() }
-                } label: {
-                    ToolbarControl(title: model.isScanningStorage ? "Scanning" : "Scan", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.plain)
-                .disabled(model.isScanningStorage)
 
                 Button {
                     Task { await model.checkForUpdates() }
                 } label: {
-                    ToolbarControl(title: model.isCheckingUpdates ? "Checking" : "App Updates", systemImage: "arrow.down.circle")
+                    ToolbarControl(title: model.isCheckingUpdates ? "Checking" : "Updates", systemImage: "arrow.down.circle", compact: true)
                 }
                 .buttonStyle(.plain)
                 .disabled(model.isCheckingUpdates || model.isRunningUpdates)
@@ -5936,11 +5949,27 @@ private struct DashboardToolbar: View {
                     ToolbarControl(
                         title: model.destination == .cleanup ? "Rescan" : "Cleanup",
                         systemImage: model.destination == .cleanup ? "arrow.clockwise" : "sparkles",
-                        isProminent: true
+                        isProminent: true,
+                        compact: true
                     )
                 }
                 .buttonStyle(.plain)
                 .disabled(model.destination == .cleanup && model.isScanningStorage)
+
+                if model.hasInspectorContent {
+                    Button {
+                        model.isInspectorVisible.toggle()
+                    } label: {
+                        ToolbarControl(
+                            title: model.isInspectorVisible ? "Hide Details" : "Details",
+                            systemImage: "sidebar.right",
+                            compact: true
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help(model.isInspectorVisible ? "Hide the detail inspector" : "Show details for the selected item")
+                    .accessibilityLabel(model.isInspectorVisible ? "Hide details" : "Show details")
+                }
             }
 
             if model.isScanningStorage {
@@ -8571,11 +8600,7 @@ private struct SidebarSourceParentItem: View {
     var isSelected = false
 
     var body: some View {
-        HStack(spacing: 9) {
-            Image(systemName: "chevron.down")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(isSelected ? DashboardTheme.accent : DashboardTheme.secondaryText)
-                .frame(width: 10)
+        HStack(spacing: 12) {
             Image(systemName: systemImage)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(isSelected ? DashboardTheme.accent : DashboardTheme.primaryText)
@@ -9349,7 +9374,7 @@ private func heatmapColor(for seconds: TimeInterval, maxSeconds: TimeInterval) -
 }
 
 private func usageComparisonText(_ percentChange: Double?) -> String {
-    guard let percentChange else { return "No prior data" }
+    guard let percentChange else { return "Comparison starts next period" }
     return "\(usageSignedPercentText(percentChange)) vs previous period"
 }
 
