@@ -29,16 +29,73 @@ public struct AppInventoryScanner {
             }
         }
 
-        return paths.compactMap { path in
+        let discoveredApps = paths.compactMap { path in
             app(at: URL(fileURLWithPath: path))
         }
-        .sorted { lhs, rhs in
+
+        return Self.reconcileInventory(discoveredApps).sorted { lhs, rhs in
             let nameCompare = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
             if nameCompare == .orderedSame {
                 return lhs.path < rhs.path
             }
             return nameCompare == .orderedAscending
         }
+    }
+
+    /// Produces one inventory identity for each installed application.
+    ///
+    /// Bundle identifiers are the primary identity when present. If Spotlight or a
+    /// broad scan also finds a build artifact, the canonical user-facing install
+    /// wins. Apps without bundle identifiers remain distinct by canonical path.
+    public static func reconcileInventory(_ apps: [MonitoredApp]) -> [MonitoredApp] {
+        var selected: [String: MonitoredApp] = [:]
+
+        for app in apps {
+            let key: String
+            if let bundleID = app.bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !bundleID.isEmpty {
+                key = "bundle:\(bundleID.lowercased())"
+            } else {
+                key = "path:\(canonicalPath(app.path).lowercased())"
+            }
+
+            guard let current = selected[key] else {
+                selected[key] = app
+                continue
+            }
+            if isPreferred(app, over: current) {
+                selected[key] = app
+            }
+        }
+
+        return Array(selected.values)
+    }
+
+    private static func isPreferred(_ candidate: MonitoredApp, over current: MonitoredApp) -> Bool {
+        let candidateRank = pathRank(candidate.path, isUserFacing: candidate.isUserFacing)
+        let currentRank = pathRank(current.path, isUserFacing: current.isUserFacing)
+        if candidateRank != currentRank { return candidateRank < currentRank }
+
+        let candidatePath = canonicalPath(candidate.path)
+        let currentPath = canonicalPath(current.path)
+        if candidatePath.count != currentPath.count { return candidatePath.count < currentPath.count }
+        return candidatePath.localizedStandardCompare(currentPath) == .orderedAscending
+    }
+
+    private static func pathRank(_ path: String, isUserFacing: Bool) -> Int {
+        let canonical = canonicalPath(path)
+        if canonical.hasPrefix("/Applications/") { return 0 }
+        if canonical.hasPrefix("/System/Applications/") { return 1 }
+        let userApplications = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Applications").standardizedFileURL.path + "/"
+        if canonical.hasPrefix(userApplications) { return 2 }
+        if isUserFacing { return 3 }
+        if canonical.contains("/DerivedData/") || canonical.contains("/.build/") { return 5 }
+        return 4
+    }
+
+    private static func canonicalPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path
     }
 
     public func app(for runningApplication: NSRunningApplication) -> MonitoredApp? {

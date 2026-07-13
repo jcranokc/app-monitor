@@ -1,0 +1,27 @@
+{
+  "a_docx": "/Users/jacob/.codex/plugins/cache/openai-curated-remote/openai-templates/0.1.0/skills/artifact-template-system-design/assets/reference.docx",
+  "b_docx": "/Users/jacob/Documents/App Monitor/design-review/App Monitor System and Product Design Review.docx",
+  "pages_a": 7,
+  "pages_b": 18,
+  "changed_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18
+  ],
+  "num_changed_pages": 18
+}

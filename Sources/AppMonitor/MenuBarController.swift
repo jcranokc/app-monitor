@@ -38,11 +38,15 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 )
                 button.image?.isTemplate = true
                 button.toolTip = "App Monitor"
+                button.setAccessibilityLabel("App Monitor menu")
             }
             statusItem = item
         }
 
         updateStatusItemInteraction()
+        statusItem?.button?.setAccessibilityLabel(
+            "App Monitor menu, \(model.warningCount) warnings, \(model.availableUpdateCount) updates available"
+        )
         refreshPopoverContent()
     }
 

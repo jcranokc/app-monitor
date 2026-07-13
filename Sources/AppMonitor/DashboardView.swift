@@ -33,6 +33,19 @@ struct DashboardView: View {
             UninstallPlanSheet(plan: plan)
                 .environmentObject(model)
         }
+        .sheet(isPresented: Binding(
+            get: { !model.pendingHomebrewAdoptionRecords.isEmpty },
+            set: { if !$0 { model.cancelPendingHomebrewAdoption() } }
+        )) {
+            HomebrewAdoptionConfirmationSheet(records: model.pendingHomebrewAdoptionRecords)
+                .environmentObject(model)
+        }
+        .onChange(of: model.destination) {
+            AppAccessibility.announce("\(model.destination.rawValue) screen")
+        }
+        .onChange(of: model.lastMessage) {
+            AppAccessibility.announce(model.lastMessage)
+        }
     }
 
     private func detailWidth(for width: CGFloat) -> CGFloat {
@@ -54,7 +67,9 @@ private enum DashboardTheme {
     static let cardStroke = Color.appMonitor(light: .init(0, 0, 0, 0.09), dark: .init(1, 1, 1, 0.10))
     static let softStroke = Color.appMonitor(light: .init(0, 0, 0, 0.06), dark: .init(1, 1, 1, 0.075))
     static let primaryText = Color.appMonitor(light: .init(0.055, 0.07, 0.105), dark: .init(0.91, 0.925, 0.965))
-    static let secondaryText = Color.appMonitor(light: .init(0.39, 0.42, 0.49), dark: .init(0.62, 0.66, 0.74))
+    // Deliberately clears WCAG AA against the canvas/card surfaces at normal text sizes.
+    // Secondary information should read as subordinate, not disabled.
+    static let secondaryText = Color.appMonitor(light: .init(0.31, 0.34, 0.41), dark: .init(0.72, 0.75, 0.82))
     static let accent = Color.appMonitor(light: .init(0.36, 0.25, 0.95), dark: .init(0.62, 0.54, 1))
     static let blue = Color.appMonitor(light: .init(0.21, 0.45, 0.92), dark: .init(0.36, 0.62, 1))
     static let green = Color.appMonitor(light: .init(0.2, 0.64, 0.36), dark: .init(0.35, 0.82, 0.52))
@@ -88,10 +103,12 @@ private struct AppMonitorLogoMark: View {
 private struct SidebarView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showsUpdateSources = false
+    @FocusState private var focusedSidebarID: String?
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView(.vertical, showsIndicators: false) {
+            ScrollViewReader { sidebarProxy in
+            ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack(spacing: 10) {
                         AppMonitorLogoMark(size: 34)
@@ -108,6 +125,9 @@ private struct SidebarView: View {
                             SidebarMetricItem(title: "Overview", systemImage: "house", value: "", isSelected: model.destination == .overview)
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(id: AppAccessibilityIdentifier.sidebarOverview, label: "Overview")
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebarOverview, focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebarOverview)
                     }
 
                     SidebarGroup(title: "Updates") {
@@ -124,6 +144,9 @@ private struct SidebarView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(id: AppAccessibilityIdentifier.sidebarUpdates, label: "App Updates")
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebarUpdates, focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebarUpdates)
 
                         Button {
                             model.showUpdates(filter: .packages)
@@ -138,6 +161,9 @@ private struct SidebarView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(id: AppAccessibilityIdentifier.sidebar("package-updates"), label: "Package Updates")
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebar("package-updates"), focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebar("package-updates"))
                     }
 
                     SidebarGroup(title: "Library") {
@@ -152,6 +178,9 @@ private struct SidebarView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(id: AppAccessibilityIdentifier.sidebarAllApps, label: "All Apps")
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebarAllApps, focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebarAllApps)
                         Button {
                             model.showUpdates(filter: .adoptable)
                         } label: {
@@ -163,6 +192,9 @@ private struct SidebarView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(id: AppAccessibilityIdentifier.sidebar("adopt-with-homebrew"), label: "Adopt with Homebrew")
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebar("adopt-with-homebrew"), focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebar("adopt-with-homebrew"))
                         Button {
                             model.showAppList(.recentlyUsed)
                         } label: {
@@ -174,6 +206,9 @@ private struct SidebarView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(id: AppAccessibilityIdentifier.sidebar("recently-used"), label: "Recently Used")
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebar("recently-used"), focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebar("recently-used"))
                         Button {
                             model.showAppList(.neverUsed)
                         } label: {
@@ -185,6 +220,9 @@ private struct SidebarView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(id: AppAccessibilityIdentifier.sidebar("unused-apps"), label: "Unused Apps")
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebar("unused-apps"), focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebar("unused-apps"))
                         Button {
                             model.showAppList(.systemApps)
                         } label: {
@@ -196,6 +234,9 @@ private struct SidebarView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(id: AppAccessibilityIdentifier.sidebar("system-apps"), label: "System Apps")
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebar("system-apps"), focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebar("system-apps"))
                     }
 
                     SidebarGroup(title: "Update Sources") {
@@ -237,6 +278,13 @@ private struct SidebarView: View {
                             )
                         }
                         .tint(DashboardTheme.secondaryText)
+                        .appAccessibleControl(
+                            id: AppAccessibilityIdentifier.sidebarUpdateSourcesDisclosure,
+                            label: "Browse update sources",
+                            hint: showsUpdateSources ? "Collapse update sources" : "Expand update sources"
+                        )
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebarUpdateSourcesDisclosure, focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebarUpdateSourcesDisclosure)
                     }
 
                     SidebarGroup(title: "Storage") {
@@ -246,12 +294,18 @@ private struct SidebarView: View {
                             SidebarMetricItem(title: "Storage Overview", systemImage: "externaldrive", value: "", isSelected: model.destination == .storage)
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(id: AppAccessibilityIdentifier.sidebar("storage-overview"), label: "Storage Overview")
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebar("storage-overview"), focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebar("storage-overview"))
                         Button {
                             model.navigate(.largeFiles)
                         } label: {
                             SidebarMetricItem(title: "Large Files", systemImage: "folder", value: "\(largeFileCount)", isSelected: model.destination == .largeFiles)
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(id: AppAccessibilityIdentifier.sidebar("large-files"), label: "Large Files")
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebar("large-files"), focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebar("large-files"))
                     }
 
                     SidebarGroup(title: "Usage") {
@@ -261,12 +315,18 @@ private struct SidebarView: View {
                             SidebarMetricItem(title: "Usage Trends", systemImage: "chart.xyaxis.line", value: "", isSelected: model.destination == .usageTrends)
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(id: AppAccessibilityIdentifier.sidebar("usage-trends"), label: "Usage Trends")
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebar("usage-trends"), focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebar("usage-trends"))
                         Button {
                             model.navigate(.activityTimeline)
                         } label: {
                             SidebarMetricItem(title: "Activity Timeline", systemImage: "point.3.connected.trianglepath.dotted", value: "", isSelected: model.destination == .activityTimeline)
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(id: AppAccessibilityIdentifier.sidebar("activity-timeline"), label: "Activity Timeline")
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebar("activity-timeline"), focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebar("activity-timeline"))
                     }
 
                     SidebarGroup(title: "Maintenance") {
@@ -276,23 +336,51 @@ private struct SidebarView: View {
                             SidebarMetricItem(title: "Warnings", systemImage: "exclamationmark.triangle", value: warningCountText, badgeColor: .orange.opacity(0.14), valueColor: DashboardTheme.orange, isSelected: model.destination == .warnings)
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(id: AppAccessibilityIdentifier.sidebarWarnings, label: "Warnings")
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebarWarnings, focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebarWarnings)
                         Button {
                             model.navigate(.cleanup)
                         } label: {
                             SidebarMetricItem(title: "Quarantine Review", systemImage: "shield.lefthalf.filled", value: compactBytes(potentialSavingsBytes), badgeColor: DashboardTheme.accent.opacity(0.12), valueColor: DashboardTheme.accent, isSelected: model.destination == .cleanup)
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(id: AppAccessibilityIdentifier.sidebarQuarantine, label: "Quarantine Review")
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebarQuarantine, focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebarQuarantine)
                         Button {
                             model.navigate(.history)
                         } label: {
                             SidebarMetricItem(title: "History", systemImage: "clock.arrow.circlepath", value: "", isSelected: model.destination == .history)
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(id: AppAccessibilityIdentifier.sidebarHistory, label: "History")
+                        .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebarHistory, focusedID: $focusedSidebarID)
+                        .id(AppAccessibilityIdentifier.sidebarHistory)
                     }
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 20)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .onChange(of: focusedSidebarID) {
+                guard let focusedSidebarID else { return }
+                withAnimation(.easeOut(duration: 0.16)) {
+                    sidebarProxy.scrollTo(focusedSidebarID, anchor: .center)
+                }
+            }
+            .onChange(of: model.destination) {
+                scrollActiveDestination(using: sidebarProxy)
+            }
+            .onChange(of: model.appListQuickFilter) {
+                scrollActiveDestination(using: sidebarProxy)
+            }
+            .onChange(of: model.updateListFilter) {
+                scrollActiveDestination(using: sidebarProxy)
+            }
+            .onChange(of: showsUpdateSources) {
+                scrollActiveDestination(using: sidebarProxy)
+            }
             }
 
             Divider()
@@ -305,6 +393,8 @@ private struct SidebarView: View {
                     SidebarMetricItem(title: "Settings", systemImage: "gearshape", value: "", isSelected: model.destination == .settings)
                 }
                 .buttonStyle(.plain)
+                .appAccessibleControl(id: AppAccessibilityIdentifier.sidebarSettings, label: "Settings")
+                .sidebarKeyboardFocus(id: AppAccessibilityIdentifier.sidebarSettings, focusedID: $focusedSidebarID)
 
                 ScanStatusCard(lastScan: lastScanDate, nextScan: model.scanSchedule.nextScanAt)
             }
@@ -319,6 +409,52 @@ private struct SidebarView: View {
                 endPoint: .bottomTrailing
             )
         )
+        .onAppear {
+            focusedSidebarID = sidebarAccessibilityID(for: model.destination)
+        }
+        .onChange(of: model.destination) {
+            focusedSidebarID = sidebarAccessibilityID(for: model.destination)
+        }
+    }
+
+    private func sidebarAccessibilityID(for destination: AppModel.DashboardDestination) -> String {
+        switch destination {
+        case .overview: return AppAccessibilityIdentifier.sidebarOverview
+        case .storage: return AppAccessibilityIdentifier.sidebar("storage-overview")
+        case .largeFiles: return AppAccessibilityIdentifier.sidebar("large-files")
+        case .usageTable: return AppAccessibilityIdentifier.sidebarAllApps
+        case .usageTrends: return AppAccessibilityIdentifier.sidebar("usage-trends")
+        case .activityTimeline: return AppAccessibilityIdentifier.sidebar("activity-timeline")
+        case .warnings: return AppAccessibilityIdentifier.sidebarWarnings
+        case .updates: return AppAccessibilityIdentifier.sidebarUpdates
+        case .cleanup: return AppAccessibilityIdentifier.sidebarQuarantine
+        case .history: return AppAccessibilityIdentifier.sidebarHistory
+        case .settings: return AppAccessibilityIdentifier.sidebarSettings
+        }
+    }
+
+    private func scrollActiveDestination(using proxy: ScrollViewProxy) {
+        let id: String
+        if model.destination == .usageTable {
+            switch model.appListQuickFilter {
+            case .all: id = AppAccessibilityIdentifier.sidebarAllApps
+            case .recentlyUsed: id = AppAccessibilityIdentifier.sidebar("recently-used")
+            case .neverUsed: id = AppAccessibilityIdentifier.sidebar("unused-apps")
+            case .systemApps: id = AppAccessibilityIdentifier.sidebar("system-apps")
+            }
+        } else if model.destination == .updates {
+            switch model.updateListFilter {
+            case .packages: id = AppAccessibilityIdentifier.sidebar("package-updates")
+            case .adoptable: id = AppAccessibilityIdentifier.sidebar("adopt-with-homebrew")
+            case .source: id = AppAccessibilityIdentifier.sidebarUpdateSourcesDisclosure
+            default: id = AppAccessibilityIdentifier.sidebarUpdates
+            }
+        } else {
+            id = sidebarAccessibilityID(for: model.destination)
+        }
+        withAnimation(.easeOut(duration: 0.16)) {
+            proxy.scrollTo(id, anchor: .center)
+        }
     }
 
     private var largeFileCount: Int {
@@ -388,15 +524,15 @@ private struct SidebarView: View {
 
 private struct DashboardMainView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var showsCleanupNotice = false
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 160), spacing: 12)
+    private let overviewColumns = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
     ]
 
     var body: some View {
         VStack(spacing: 0) {
-            DashboardToolbar(showsCleanupNotice: $showsCleanupNotice)
+            DashboardToolbar()
 
             ScrollView {
                 Group {
@@ -411,74 +547,118 @@ private struct DashboardMainView: View {
             }
             .id(model.destination)
         }
-        .alert("Cleanup needs a cleanup engine", isPresented: $showsCleanupNotice) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("The dashboard can estimate possible savings from related files, but deletion, safety checks, permissions, and undo are not implemented yet.")
-        }
     }
 
     private var overviewContent: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ScreenHeader(title: "Overview", subtitle: "Your Mac at a glance")
-                .padding(.top, 6)
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(alignment: .top, spacing: 16) {
+                ScreenHeader(title: "Overview", subtitle: "Decide what needs attention, what can wait, and where space can be reclaimed.")
+                Spacer(minLength: 12)
+                OverviewFreshnessBadge(lastScan: lastScanDate, isScanning: model.isScanningStorage)
+            }
+            .padding(.top, 6)
 
-            LazyVGrid(columns: columns, spacing: 12) {
-                SummaryCard(
-                    title: "Applications",
-                    systemImage: "circle.hexagongrid",
-                    value: "\(model.rows.count)",
-                    unit: nil,
-                    subtitle: "Installed",
-                    footer: "\(recentlyDiscoveredCount) discovered this week",
-                    footerSystemImage: "arrow.up.right",
-                    tint: DashboardTheme.accent
-                )
+            OverviewSectionHeader(
+                title: "Needs action",
+                subtitle: "Start with the highest-priority item detected on this Mac."
+            )
 
-                SummaryCard(
-                    title: "Used This Period",
-                    systemImage: "clock",
-                    value: "\(recentlyUsedCount)",
-                    unit: nil,
-                    subtitle: "Apps",
-                    footer: "\(model.displayedRows.count) matching filters",
-                    footerSystemImage: "arrow.down",
+            OverviewPriorityCard(
+                title: priorityTitle,
+                value: priorityValue,
+                definition: priorityDefinition,
+                actionTitle: priorityActionTitle,
+                systemImage: prioritySystemImage,
+                tint: priorityTint,
+                action: openPriorityAction
+            )
+
+            OverviewSectionHeader(
+                title: "What changed",
+                subtitle: "New inventory and update signals since recent checks."
+            )
+
+            LazyVGrid(columns: overviewColumns, spacing: 12) {
+                OverviewDecisionMetric(
+                    title: "Updates available",
+                    value: "\(model.availableUpdateCount)",
+                    definition: "Installed apps and packages with a newer version detected.",
+                    actionTitle: "View updates",
+                    systemImage: "arrow.down.circle",
                     tint: DashboardTheme.blue
-                )
+                ) {
+                    model.showUpdates()
+                }
 
-                SummaryCard(
-                    title: "Unused 30 Days",
-                    systemImage: "sparkle.magnifyingglass",
-                    value: "\(unusedCount)",
-                    unit: nil,
-                    subtitle: "Apps",
-                    footer: "Review recommended",
-                    footerSystemImage: "exclamationmark.triangle.fill",
-                    tint: DashboardTheme.orange
-                )
-
-                SummaryCard(
-                    title: "Storage Used",
-                    systemImage: "shippingbox",
-                    value: compactBytes(model.scannedSizeBytes),
-                    unit: nil,
-                    subtitle: "Total",
-                    footer: "\(compactBytes(weeklyStorageDelta)) this week",
-                    footerSystemImage: "arrow.up.right",
+                OverviewDecisionMetric(
+                    title: "Discovered this week",
+                    value: "\(recentlyDiscoveredCount)",
+                    definition: "Apps first seen by App Monitor during this calendar week.",
+                    actionTitle: "View all apps",
+                    systemImage: "sparkles",
                     tint: DashboardTheme.accent
-                )
+                ) {
+                    model.showAppList(.all)
+                }
+            }
 
-                SummaryCard(
-                    title: "Potential Savings",
-                    systemImage: "leaf",
+            OverviewSectionHeader(
+                title: "Safe to defer",
+                subtitle: "These apps do not need an inactivity decision right now."
+            )
+
+            LazyVGrid(columns: overviewColumns, spacing: 12) {
+                OverviewDecisionMetric(
+                    title: "Recently active",
+                    value: "\(recentlyUsedCount)",
+                    definition: "Apps with recorded activity in the selected reporting period.",
+                    actionTitle: "View recently used",
+                    systemImage: "clock.badge.checkmark",
+                    tint: DashboardTheme.green
+                ) {
+                    model.showAppList(.recentlyUsed)
+                }
+
+                OverviewDecisionMetric(
+                    title: "System apps",
+                    value: "\(model.rowCount(for: .systemApps))",
+                    definition: "System bundles separated from routine app cleanup review.",
+                    actionTitle: "View system apps",
+                    systemImage: "gearshape.2",
+                    tint: DashboardTheme.secondaryText
+                ) {
+                    model.showAppList(.systemApps)
+                }
+            }
+
+            OverviewSectionHeader(
+                title: "Reclaimable space",
+                subtitle: "Review candidates before anything is quarantined or removed."
+            )
+
+            LazyVGrid(columns: overviewColumns, spacing: 12) {
+                OverviewDecisionMetric(
+                    title: "Potential savings",
                     value: compactBytes(potentialSavingsBytes),
-                    unit: nil,
-                    subtitle: "Reviewed",
-                    footer: "\(cleanupSuggestionCount) suggestions",
-                    footerSystemImage: "checkmark.circle.fill",
+                    definition: "Total size of pending or approved cleanup suggestions.",
+                    actionTitle: "Review \(cleanupSuggestionCount) suggestions",
+                    systemImage: "leaf",
                     tint: DashboardTheme.green,
-                    isSoftGreen: true
-                )
+                    emphasized: true
+                ) {
+                    model.navigate(.cleanup)
+                }
+
+                OverviewDecisionMetric(
+                    title: "Storage measured",
+                    value: compactBytes(model.scannedSizeBytes),
+                    definition: "Combined app and related-file size from the latest stored scan.",
+                    actionTitle: "Explore storage",
+                    systemImage: "externaldrive",
+                    tint: DashboardTheme.accent
+                ) {
+                    model.showStorageExplorer()
+                }
             }
 
             HStack(alignment: .top, spacing: 16) {
@@ -487,8 +667,64 @@ private struct DashboardMainView: View {
                 StorageBreakdownCard()
                     .frame(maxWidth: .infinity)
             }
+        }
+    }
 
-            UsageTrendsCard()
+    private var lastScanDate: Date? {
+        model.scanSchedule.lastScanAt ?? model.rows.compactMap(\.scannedAt).max()
+    }
+
+    private var priorityTitle: String {
+        if model.warningCount > 0 { return "Review warnings" }
+        if model.availableUpdateCount > 0 { return "Install available updates" }
+        if unusedCount > 0 { return "Review unused apps" }
+        return "No immediate action needed"
+    }
+
+    private var priorityValue: String {
+        if model.warningCount > 0 { return "\(model.warningCount)" }
+        if model.availableUpdateCount > 0 { return "\(model.availableUpdateCount)" }
+        if unusedCount > 0 { return "\(unusedCount)" }
+        return "All clear"
+    }
+
+    private var priorityDefinition: String {
+        if model.warningCount > 0 { return "Open health, security, compatibility, or storage findings that have not been deferred or resolved." }
+        if model.availableUpdateCount > 0 { return "Installed apps and packages with a newer version ready for review." }
+        if unusedCount > 0 { return "Apps with no recorded activity in the last 30 days; review before removing anything." }
+        return "The latest stored scan found no open warnings, available updates, or 30-day inactivity candidates."
+    }
+
+    private var priorityActionTitle: String {
+        if model.warningCount > 0 { return "Review warnings" }
+        if model.availableUpdateCount > 0 { return "Review updates" }
+        if unusedCount > 0 { return "Review unused apps" }
+        return "View scan history"
+    }
+
+    private var prioritySystemImage: String {
+        if model.warningCount > 0 { return "exclamationmark.triangle.fill" }
+        if model.availableUpdateCount > 0 { return "arrow.down.circle.fill" }
+        if unusedCount > 0 { return "clock.badge.questionmark" }
+        return "checkmark.seal.fill"
+    }
+
+    private var priorityTint: Color {
+        if model.warningCount > 0 { return DashboardTheme.orange }
+        if model.availableUpdateCount > 0 { return DashboardTheme.blue }
+        if unusedCount > 0 { return DashboardTheme.orange }
+        return DashboardTheme.green
+    }
+
+    private func openPriorityAction() {
+        if model.warningCount > 0 {
+            model.navigate(.warnings)
+        } else if model.availableUpdateCount > 0 {
+            model.showUpdates()
+        } else if unusedCount > 0 {
+            model.showAppList(.neverUsed)
+        } else {
+            model.navigate(.history)
         }
     }
 
@@ -506,12 +742,6 @@ private struct DashboardMainView: View {
 
     private var cleanupSuggestionCount: Int {
         model.activeCleanupSuggestions.count
-    }
-
-    private var weeklyStorageDelta: Int64 {
-        model.rows
-            .filter { $0.scannedAt.map { Calendar.current.isDate($0, equalTo: Date(), toGranularity: .weekOfYear) } ?? false }
-            .reduce(0) { $0 + $1.totalSizeBytes }
     }
 
     private var recentlyDiscoveredCount: Int {
@@ -573,8 +803,13 @@ private struct UsageTableScreen: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             if showsHeader {
-                ScreenHeader(title: model.appListQuickFilter.tableTitle, subtitle: model.appListQuickFilter.tableSubtitle)
-                    .padding(.top, 6)
+                HStack(alignment: .bottom, spacing: 12) {
+                    ScreenHeader(title: model.appListQuickFilter.tableTitle, subtitle: model.appListQuickFilter.tableSubtitle)
+                    Spacer()
+                    ReportingPeriodMenu()
+                    UsageTableOptionsMenu()
+                }
+                .padding(.top, 6)
             }
 
             DashboardCard {
@@ -588,11 +823,117 @@ private struct UsageTableScreen: View {
                             UsageTableRow(row: row)
                         }
                         .buttonStyle(.plain)
+                        .appAccessibleControl(
+                            id: AppAccessibilityIdentifier.appRow(row.app.id),
+                            label: "\(row.app.name), \(AppMonitorFormatting.duration(row.usageSeconds)) usage, \(row.scannedTotalSizeBytes.map(compactBytes) ?? "not scanned") storage",
+                            hint: "Show app details"
+                        )
                         Divider()
                     }
                 }
             }
         }
+    }
+}
+
+private struct UsageTableOptionsMenu: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        Menu {
+            Section("Filters") {
+                Toggle("Show all bundles", isOn: $model.includeAllBundles)
+                Toggle("Show ignored apps", isOn: $model.includeIgnoredApps)
+                Toggle("Warnings only", isOn: $model.filterState.warningsOnly)
+                Toggle("Cleanup candidates only", isOn: $model.filterState.cleanupOnly)
+                Toggle("Hide protected apps", isOn: $model.filterState.hideProtectedApps)
+
+                Menu("Storage category") {
+                    Button("Any Category") { model.filterState.category = nil }
+                    ForEach(StorageCategory.allCases) { category in
+                        Button {
+                            model.filterState.category = category
+                        } label: {
+                            if model.filterState.category == category {
+                                Label(category.rawValue, systemImage: "checkmark")
+                            } else {
+                                Text(category.rawValue)
+                            }
+                        }
+                    }
+                }
+
+                Menu("Storage threshold") {
+                    Button("Any Size") { model.filterState.minimumStorageBytes = 0 }
+                    Button("100 MB+") { model.filterState.minimumStorageBytes = 100_000_000 }
+                    Button("500 MB+") { model.filterState.minimumStorageBytes = 500_000_000 }
+                    Button("1 GB+") { model.filterState.minimumStorageBytes = 1_000_000_000 }
+                }
+
+                Menu("Usage time") {
+                    ForEach(AppUsageTimeFilter.allCases) { usageTime in
+                        Button {
+                            model.filterState.usageTime = usageTime
+                        } label: {
+                            if model.filterState.usageTime == usageTime {
+                                Label(usageTime.rawValue, systemImage: "checkmark")
+                            } else {
+                                Text(usageTime.rawValue)
+                            }
+                        }
+                    }
+                }
+
+                Menu("Date range") {
+                    ForEach(AppDateRangeFilter.allCases) { range in
+                        Button {
+                            model.filterState.dateRange = range
+                        } label: {
+                            if model.filterState.dateRange == range {
+                                Label(range.rawValue, systemImage: "checkmark")
+                            } else {
+                                Text(range.rawValue)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section("Saved Filters") {
+                Button("Save Current Filter") { model.saveCurrentFilter() }
+                ForEach(model.savedFilters) { filter in
+                    Button(filter.name) { model.applySavedFilter(filter) }
+                }
+                Button("Clear Filters") { model.clearFilters() }
+            }
+
+            Section("Sort") {
+                Button("Usage") {
+                    model.sortKey = .usage
+                    model.sortAscending = false
+                }
+                Button("Storage") {
+                    model.sortKey = .totalSize
+                    model.sortAscending = false
+                }
+                Button("Name") {
+                    model.sortKey = .app
+                    model.sortAscending = true
+                }
+            }
+
+            Section("Export") {
+                Button("Current App Table CSV") { model.exportCurrentRows() }
+            }
+        } label: {
+            ToolbarControl(title: "Table Options", systemImage: "slider.horizontal.3", compact: true)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .help("Filter, sort, save, or export the current app table")
+        .accessibilityLabel("App table options")
+        .accessibilityIdentifier(AppAccessibilityIdentifier.appTableOptions)
+        .appKeyboardFocusRing()
     }
 }
 
@@ -637,11 +978,11 @@ private struct UsageTableRow: View {
                 .font(.callout)
                 .monospacedDigit()
                 .frame(width: 86, alignment: .trailing)
-            Text(AppMonitorFormatting.shortDateTime(row.lastSeen))
+            Text(row.lastSeen.map(AppMonitorFormatting.shortDateTime) ?? row.activityState.displayName)
                 .font(.caption)
                 .foregroundStyle(DashboardTheme.secondaryText)
                 .frame(width: 112, alignment: .leading)
-            Text(compactBytes(row.totalSizeBytes))
+            Text(row.scannedTotalSizeBytes.map(compactBytes) ?? "Not scanned")
                 .font(.callout)
                 .monospacedDigit()
                 .frame(width: 92, alignment: .trailing)
@@ -892,14 +1233,18 @@ private struct UsageAnalyticsHeatmapCard: View {
                     ForEach(rows.prefix(8), id: \.label) { row in
                         HStack(spacing: 5) {
                             Text(row.label)
-                                .font(.caption2)
+                                .font(.caption)
                                 .foregroundStyle(DashboardTheme.secondaryText)
                                 .frame(width: 48, alignment: .leading)
                             ForEach(row.cells) { cell in
-                                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                    .fill(heatmapColor(for: cell))
+                                AccessibleHeatmapCell(intensity: heatmapIntensity(for: cell), cornerRadius: 3)
                                     .frame(width: 10, height: 10)
-                                    .help("\(row.label), \(cell.hourOfDay):00: \(AppMonitorFormatting.duration(cell.seconds))")
+                                    .help(heatmapTooltip(cell))
+                                    .accessibilityElement(children: .ignore)
+                                    .accessibilityLabel("Usage heatmap data point")
+                                    .accessibilityValue(heatmapAccessibilityValue(cell))
+                                    .accessibilityAddTraits(.isStaticText)
+                                    .focusable()
                             }
                         }
                     }
@@ -919,11 +1264,9 @@ private struct UsageAnalyticsHeatmapCard: View {
             }
     }
 
-    private func heatmapColor(for cell: UsageHeatmapCell) -> Color {
-        guard maxSeconds > 0, cell.seconds > 0 else {
-            return DashboardTheme.track
-        }
-        return DashboardTheme.accent.opacity(0.18 + 0.72 * min(1, cell.seconds / maxSeconds))
+    private func heatmapIntensity(for cell: UsageHeatmapCell) -> Double {
+        guard maxSeconds > 0, cell.seconds > 0 else { return 0 }
+        return min(1, cell.seconds / maxSeconds)
     }
 
     private var maxSeconds: TimeInterval {
@@ -1049,6 +1392,7 @@ private struct StorageExplorerScreen: View {
 
 private struct LargeFilesScreen: View {
     @EnvironmentObject private var model: AppModel
+    @State private var expandedPathIDs: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -1064,44 +1408,172 @@ private struct LargeFilesScreen: View {
                     } else {
                         ForEach(model.largeFiles) { record in
                             Divider()
-                            HStack(spacing: 12) {
-                                Image(systemName: "doc")
-                                    .frame(width: 24)
-                                    .foregroundStyle(DashboardTheme.blue)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(URL(fileURLWithPath: record.path).lastPathComponent)
-                                        .font(.callout.weight(.medium))
-                                        .lineLimit(1)
-                                    Text("\(model.appName(for: record.appID)) · \(record.category.rawValue) · \(record.riskReason)")
-                                        .font(.caption)
-                                        .foregroundStyle(DashboardTheme.secondaryText)
-                                        .lineLimit(2)
+                            LargeFileReviewRow(
+                                record: record,
+                                showsFullPath: expandedPathIDs.contains(record.id),
+                                toggleFullPath: {
+                                    if expandedPathIDs.contains(record.id) {
+                                        expandedPathIDs.remove(record.id)
+                                    } else {
+                                        expandedPathIDs.insert(record.id)
+                                    }
                                 }
-                                Spacer()
-                                Text(compactBytes(record.sizeBytes))
-                                    .font(.callout)
-                                    .monospacedDigit()
-                                Text(record.state.rawValue)
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(record.state == .needsReview ? DashboardTheme.orange : DashboardTheme.secondaryText)
-                                    .frame(width: 82, alignment: .leading)
-                                Menu {
-                                    Button("Preview") { model.preview(path: record.path) }
-                                    Button("Reveal in Finder") { model.revealInFinder(path: record.path) }
-                                    Button("Move to Quarantine") { model.quarantineLargeFile(record) }
-                                    Button("Ignore") { model.ignoreLargeFile(record) }
-                                } label: {
-                                    Image(systemName: "ellipsis.circle")
-                                }
-                                .menuStyle(.button)
-                                .buttonStyle(.plain)
-                            }
-                            .padding(.vertical, 10)
+                            )
                         }
                     }
                 }
             }
         }
+    }
+}
+
+private struct LargeFileReviewRow: View {
+    @EnvironmentObject private var model: AppModel
+    let record: LargeFileRecord
+    let showsFullPath: Bool
+    let toggleFullPath: () -> Void
+
+    private var ownerName: String {
+        model.appName(for: record.appID)
+    }
+
+    private var hasKnownOwner: Bool {
+        model.appRow(for: record.appID) != nil
+    }
+
+    private var riskLabel: String {
+        switch record.riskScore {
+        case 60...: return "High risk"
+        case 35...: return "Medium risk"
+        default: return "Low risk"
+        }
+    }
+
+    private var riskColor: Color {
+        switch record.riskScore {
+        case 60...: return DashboardTheme.red
+        case 35...: return DashboardTheme.orange
+        default: return DashboardTheme.green
+        }
+    }
+
+    private var stateLabel: String {
+        switch record.state {
+        case .needsReview: return "Needs review"
+        case .queuedForQuarantine: return "In quarantine review"
+        case .ignored: return "Ignored"
+        case .quarantined: return "Quarantined"
+        case .removed: return "Removed"
+        case .failed: return "Action failed"
+        }
+    }
+
+    private var modifiedText: String {
+        record.modifiedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Unavailable"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.title3)
+                    .frame(width: 26, height: 26)
+                    .foregroundStyle(DashboardTheme.blue)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(URL(fileURLWithPath: record.path).lastPathComponent)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(DashboardTheme.primaryText)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .help(URL(fileURLWithPath: record.path).lastPathComponent)
+
+                    HStack(spacing: 7) {
+                        Label(ownerName, systemImage: "app")
+                        Text("·")
+                        Text(record.category.rawValue)
+                        Text("·")
+                        Text("Modified \(modifiedText)")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(DashboardTheme.secondaryText)
+
+                    Text("Why it surfaced: Exceeds the 100 MB review threshold. \(record.riskReason)")
+                        .font(.caption)
+                        .foregroundStyle(DashboardTheme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                VStack(alignment: .trailing, spacing: 7) {
+                    Text(compactBytes(record.sizeBytes))
+                        .font(.callout.weight(.semibold))
+                        .monospacedDigit()
+                    HStack(spacing: 6) {
+                        LargeFileEvidenceBadge(text: "\(riskLabel) · \(record.riskScore)/100", color: riskColor)
+                        LargeFileEvidenceBadge(text: stateLabel, color: record.state == .needsReview ? DashboardTheme.orange : DashboardTheme.secondaryText)
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                LargeFileEvidenceBadge(
+                    text: hasKnownOwner ? "High-confidence app match" : "Ownership needs verification",
+                    color: hasKnownOwner ? DashboardTheme.green : DashboardTheme.orange
+                )
+
+                Button(showsFullPath ? "Hide Full Path" : "Show Full Path", action: toggleFullPath)
+                    .buttonStyle(.link)
+                    .font(.caption.weight(.medium))
+            }
+
+            if showsFullPath {
+                Text(record.path)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(DashboardTheme.primaryText)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(DashboardTheme.card.opacity(0.72), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            }
+
+            HStack(spacing: 10) {
+                Button { model.preview(path: record.path) } label: {
+                    Label("Inspect", systemImage: "eye")
+                }
+                Button { model.revealInFinder(path: record.path) } label: {
+                    Label("Reveal", systemImage: "finder")
+                }
+                Button { model.addLargeFileToQuarantineReview(record) } label: {
+                    Label("Add to Quarantine Review", systemImage: "shield.lefthalf.filled")
+                }
+                .disabled(record.state == .queuedForQuarantine || record.state == .quarantined)
+                Button { model.ignoreLargeFile(record) } label: {
+                    Label("Ignore", systemImage: "eye.slash")
+                }
+                .disabled(record.state == .ignored)
+                Spacer()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.vertical, 13)
+    }
+}
+
+private struct LargeFileEvidenceBadge: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.12), in: Capsule())
     }
 }
 
@@ -2287,8 +2759,10 @@ private struct TimelineHeatmapDayRow: View {
                     Button {
                         onBucketSelect(bucket)
                     } label: {
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
-                            .fill(DashboardTheme.accent.opacity(0.16 + 0.78 * (bucket.totalDurationSeconds / maxSeconds)))
+                        AccessibleHeatmapCell(
+                            intensity: min(1, bucket.totalDurationSeconds / maxSeconds),
+                            cornerRadius: 3
+                        )
                     }
                     .buttonStyle(.plain)
                     .frame(maxWidth: .infinity, minHeight: 20)
@@ -2302,6 +2776,49 @@ private struct TimelineHeatmapDayRow: View {
                 }
             }
         }
+    }
+}
+
+private struct AccessibleHeatmapCell: View {
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+    @Environment(\.colorSchemeContrast) private var accessibilityContrast
+
+    let intensity: Double
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(fillColor)
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(borderColor, lineWidth: accessibilityContrast == .increased ? 1.5 : 0.75)
+            }
+            .overlay {
+                if differentiateWithoutColor, intensity > 0 {
+                    Image(systemName: patternSymbol)
+                        .font(.system(size: intensity < 0.34 ? 3 : 4, weight: .black))
+                        .foregroundStyle(DashboardTheme.primaryText.opacity(0.9))
+                        .accessibilityHidden(true)
+                }
+            }
+    }
+
+    private var fillColor: Color {
+        guard intensity > 0 else { return DashboardTheme.track }
+        let floor = accessibilityContrast == .increased ? 0.32 : 0.18
+        return DashboardTheme.accent.opacity(floor + (1 - floor) * intensity)
+    }
+
+    private var borderColor: Color {
+        intensity > 0
+            ? DashboardTheme.primaryText.opacity(accessibilityContrast == .increased ? 0.78 : 0.28)
+            : DashboardTheme.secondaryText.opacity(accessibilityContrast == .increased ? 0.72 : 0.24)
+    }
+
+    private var patternSymbol: String {
+        if intensity >= 0.67 { return "square.fill" }
+        if intensity >= 0.34 { return "circle.fill" }
+        return "diamond.fill"
     }
 }
 
@@ -2361,8 +2878,10 @@ private struct LegacyWarningsScreen: View {
 private struct WarningsScreen: View {
     @EnvironmentObject private var model: AppModel
     @State private var selectedFilter: WarningCategoryFilter = .all
+    @State private var dispositionFilter: WarningDispositionFilter = .open
     @State private var sortMode: WarningSortMode = .severity
     @State private var expandedSeverities: Set<AppWarningSeverity> = []
+    @State private var pendingBulkAction: AppWarningDisposition?
 
     var body: some View {
         let warnings = visibleWarnings
@@ -2373,9 +2892,9 @@ private struct WarningsScreen: View {
 
             LazyVGrid(columns: warningSummaryColumns, spacing: 12) {
                 WarningMetricCard(
-                    title: "Total Warnings",
-                    value: "\(model.warningItems.count)",
-                    subtitle: "Across \(Set(model.warningItems.map(\.appID)).count) apps",
+                    title: "Open Warnings",
+                    value: "\(model.activeWarningItems.count)",
+                    subtitle: "Across \(Set(model.activeWarningItems.map(\.appID)).count) apps",
                     tint: DashboardTheme.primaryText
                 )
                 ForEach(AppWarningSeverity.allCases) { severity in
@@ -2404,6 +2923,38 @@ private struct WarningsScreen: View {
                 }
 
                 Spacer(minLength: 12)
+
+                Menu {
+                    ForEach(WarningDispositionFilter.allCases) { filter in
+                        Button {
+                            dispositionFilter = filter
+                            ensureSelection(in: visibleWarnings)
+                        } label: {
+                            if dispositionFilter == filter {
+                                Label(filter.title, systemImage: "checkmark")
+                            } else {
+                                Text(filter.title)
+                            }
+                        }
+                    }
+                } label: {
+                    ToolbarControl(title: dispositionFilter.title, systemImage: "checklist", trailingSystemImage: "chevron.down", compact: true)
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+
+                Menu {
+                    Button("Acknowledge Visible") { pendingBulkAction = .acknowledged }
+                    Button("Ignore Visible") { pendingBulkAction = .ignored }
+                    Button("Mark Visible as False Positive") { pendingBulkAction = .falsePositive }
+                    Divider()
+                    Button("Reopen Visible") { pendingBulkAction = .open }
+                } label: {
+                    ToolbarControl(title: "Bulk Actions", systemImage: "checkmark.circle", trailingSystemImage: "chevron.down", compact: true)
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .disabled(warnings.isEmpty)
 
                 Menu {
                     ForEach(WarningSortMode.allCases) { mode in
@@ -2447,6 +2998,17 @@ private struct WarningsScreen: View {
         .onAppear {
             ensureSelection(in: visibleWarnings)
         }
+        .alert(item: $pendingBulkAction) { disposition in
+            Alert(
+                title: Text("Confirm \(disposition.displayName)"),
+                message: Text("Apply this action to all \(warnings.count) warnings in the current category, status, search, and sort scope? This will be recorded in warning history."),
+                primaryButton: .destructive(Text("Apply to \(warnings.count)")) {
+                    model.setWarningDisposition(disposition, for: warnings)
+                    ensureSelection(in: visibleWarnings)
+                },
+                secondaryButton: .cancel()
+            )
+        }
     }
 
     private var warningSummaryColumns: [GridItem] {
@@ -2455,8 +3017,9 @@ private struct WarningsScreen: View {
 
     private var visibleWarnings: [AppWarningItem] {
         let query = model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let filtered = model.warningItems.filter { warning in
+        let filtered = model.auditableWarningItems.filter { warning in
             guard selectedFilter.includes(warning) else { return false }
+            guard dispositionFilter.includes(model.warningDisposition(for: warning)) else { return false }
             guard !query.isEmpty else { return true }
             return warning.title.lowercased().contains(query)
                 || warning.detail.lowercased().contains(query)
@@ -2491,10 +3054,10 @@ private struct WarningsScreen: View {
     }
 
     private var emptyMessage: String {
-        if model.warningItems.isEmpty {
+        if model.warningItems.isEmpty && model.warningTriageRecords.isEmpty {
             return "Run Scan to audit app health, storage, cleanup candidates, and update signals."
         }
-        return "No warnings match the current search or filter."
+        return "No warnings match the current category, triage status, or search."
     }
 
     private func severityGroups(for warnings: [AppWarningItem]) -> [(severity: AppWarningSeverity, warnings: [AppWarningItem])] {
@@ -2519,11 +3082,11 @@ private struct WarningsScreen: View {
     }
 
     private func warningCount(for severity: AppWarningSeverity) -> Int {
-        model.warningItems.filter { $0.severity == severity }.count
+        model.activeWarningItems.filter { $0.severity == severity }.count
     }
 
     private func warningCount(for filter: WarningCategoryFilter) -> Int {
-        model.warningItems.filter(filter.includes).count
+        model.activeWarningItems.filter(filter.includes).count
     }
 
     private func warningMetricSubtitle(for severity: AppWarningSeverity) -> String {
@@ -2556,6 +3119,27 @@ private struct WarningsScreen: View {
             expandedSeverities.remove(severity)
         } else {
             expandedSeverities.insert(severity)
+        }
+    }
+}
+
+private enum WarningDispositionFilter: String, CaseIterable, Identifiable {
+    case open = "Open Queue"
+    case acknowledged = "Acknowledged"
+    case suppressed = "Suppressed"
+    case verified = "Verified"
+    case all = "All History"
+
+    var id: String { rawValue }
+    var title: String { rawValue }
+
+    func includes(_ disposition: AppWarningDisposition) -> Bool {
+        switch self {
+        case .open: return disposition == .open
+        case .acknowledged: return disposition == .acknowledged
+        case .suppressed: return disposition.isSuppressed
+        case .verified: return disposition == .verified
+        case .all: return true
         }
     }
 }
@@ -2721,6 +3305,11 @@ private struct WarningSeveritySection: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .appAccessibleControl(
+                        id: AppAccessibilityIdentifier.warningRow(warning.id),
+                        label: "\(warning.appName), \(warning.title), \(warning.severity.rawValue)",
+                        hint: "Show warning details"
+                    )
                 }
 
                 if hiddenCount > 0 || (isExpanded && warnings.count > defaultVisibleCount) {
@@ -2744,6 +3333,7 @@ private struct WarningSeveritySection: View {
 }
 
 private struct WarningListRow: View {
+    @EnvironmentObject private var model: AppModel
     let warning: AppWarningItem
     let isSelected: Bool
 
@@ -2772,6 +3362,15 @@ private struct WarningListRow: View {
                     .foregroundStyle(DashboardTheme.secondaryText)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                if model.warningDisposition(for: warning) != .open {
+                    Text(model.warningDisposition(for: warning).displayName)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(DashboardTheme.accent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(DashboardTheme.accent.opacity(0.1))
+                        .clipShape(Capsule())
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -3006,6 +3605,11 @@ private struct CleanupFilterPills: View {
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .appAccessibleControl(
+                    id: AppAccessibilityIdentifier.setting("quarantine-filter-\(filter.rawValue)"),
+                    label: "Quarantine filter: \(filter.rawValue)",
+                    cornerRadius: 15
+                )
             }
         }
     }
@@ -3039,6 +3643,8 @@ private struct CleanupSortMenu: View {
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
+        .accessibilityIdentifier(AppAccessibilityIdentifier.quarantineSort)
+        .appKeyboardFocusRing()
     }
 }
 
@@ -3097,6 +3703,10 @@ private struct CleanupSuggestionListRow: View {
             }
             .buttonStyle(.plain)
             .help(isQueued ? "Remove from cleanup" : "Add to cleanup")
+            .appAccessibleControl(
+                id: AppAccessibilityIdentifier.quarantineSelection(suggestion.id),
+                label: "\(isQueued ? "Remove" : "Add") \(cleanupDisplayTitle(suggestion, appName: model.appName(for: suggestion.appID))) \(isQueued ? "from" : "to") quarantine queue"
+            )
 
             CleanupSuggestionIcon(row: row, suggestion: suggestion, size: 32)
 
@@ -3108,9 +3718,10 @@ private struct CleanupSuggestionListRow: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                     CleanupBadge(text: cleanupSeverityLabel(suggestion), color: cleanupSeverityColor(suggestion.severity))
-                    if cleanupIsLowRisk(suggestion), suggestion.severity != .low {
-                        CleanupBadge(text: "Safe", color: DashboardTheme.green)
-                    }
+                    CleanupBadge(
+                        text: cleanupConfidence(suggestion, row: row).rawValue,
+                        color: cleanupConfidenceColor(suggestion, row: row)
+                    )
                     if isQueued {
                         CleanupBadge(text: "Queued", color: DashboardTheme.accent)
                     }
@@ -3167,6 +3778,9 @@ private struct CleanupSuggestionListRow: View {
             model.focusCleanupSuggestion(suggestion)
         }
         .help(suggestion.path)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(AppAccessibilityIdentifier.quarantineRow(suggestion.id))
+        .accessibilityLabel("\(cleanupDisplayTitle(suggestion, appName: model.appName(for: suggestion.appID))), \(compactBytes(suggestion.sizeBytes)), \(cleanupSeverityLabel(suggestion)) risk")
     }
 
     private func itemCountText(_ count: Int?) -> String {
@@ -3201,18 +3815,37 @@ private struct CleanupSuggestionIcon: View {
 }
 
 private struct CleanupBadge: View {
+    @Environment(\.colorSchemeContrast) private var accessibilityContrast
     let text: String
     let color: Color
 
     var body: some View {
-        Text(text)
-            .font(.caption2.weight(.semibold))
+        HStack(spacing: 4) {
+            Image(systemName: systemImage)
+                .font(.system(size: 9, weight: .bold))
+                .accessibilityHidden(true)
+            Text(text)
+        }
+            .font(.caption.weight(.semibold))
             .foregroundStyle(color)
             .lineLimit(1)
             .padding(.horizontal, 8)
-            .frame(height: 18)
+            .frame(minHeight: 22)
             .background(color.opacity(0.12))
             .clipShape(Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(color.opacity(accessibilityContrast == .increased ? 0.95 : 0.45), lineWidth: accessibilityContrast == .increased ? 1.5 : 1)
+            }
+    }
+
+    private var systemImage: String {
+        let normalized = text.lowercased()
+        if normalized.contains("safe") { return "checkmark.shield.fill" }
+        if normalized.contains("queued") { return "archivebox.fill" }
+        if normalized.contains("high") || normalized.contains("critical") { return "exclamationmark.triangle.fill" }
+        if normalized.contains("medium") { return "exclamationmark.circle.fill" }
+        return "info.circle.fill"
     }
 }
 
@@ -3240,10 +3873,11 @@ private struct CleanupSuggestionDetailPanel: View {
                     VStack(alignment: .leading, spacing: 14) {
                         CleanupInspectorHeader(suggestion: suggestion)
                         CleanupMetricStrip(suggestion: suggestion)
-                        CleanupSafetyCard(suggestion: suggestion)
                         CleanupSizeSnapshotCard(suggestion: suggestion)
                         CleanupExplanationCard(suggestion: suggestion)
                         CleanupPreviewCard(suggestion: suggestion)
+                        CleanupProtectedEvidenceCard(suggestion: suggestion)
+                        CleanupSafetyCard(suggestion: suggestion)
                     }
                     .padding(14)
                 }
@@ -3300,8 +3934,8 @@ private struct CleanupInspectorHeader: View {
                         .foregroundStyle(DashboardTheme.secondaryText)
                         .lineLimit(1)
                     CleanupBadge(
-                        text: cleanupIsLowRisk(suggestion) ? "Safe to Clean" : cleanupSeverityLabel(suggestion),
-                        color: cleanupIsLowRisk(suggestion) ? DashboardTheme.green : cleanupSeverityColor(suggestion.severity)
+                        text: cleanupConfidence(suggestion, row: model.appRow(for: suggestion.appID)).rawValue,
+                        color: cleanupConfidenceColor(suggestion, row: model.appRow(for: suggestion.appID))
                     )
                 }
 
@@ -3354,7 +3988,7 @@ private struct CleanupMetric: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.caption2.weight(.semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(DashboardTheme.secondaryText)
             Text(value)
                 .font(.callout.weight(.semibold))
@@ -3379,10 +4013,10 @@ private struct CleanupSafetyCard: View {
 
                 CleanupSafetyStep(systemImage: "eye", title: "Preview", detail: "Review the exact path before adding it to the queue.")
                 CleanupSafetyStep(systemImage: "archivebox", title: "Quarantine", detail: "Approved items are moved to App Monitor quarantine, not permanently deleted.")
-                CleanupSafetyStep(systemImage: "arrow.counterclockwise", title: "Restore", detail: "History keeps a restore point while the quarantined item remains available.")
+                CleanupSafetyStep(systemImage: "arrow.counterclockwise", title: "Restore", detail: CleanupEvidencePolicy.restoreBehavior)
 
                 Text("Original path")
-                    .font(.caption2.weight(.semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(DashboardTheme.secondaryText)
                     .padding(.top, 2)
                 Text(suggestion.path)
@@ -3421,53 +4055,59 @@ private struct CleanupSafetyStep: View {
 }
 
 private struct CleanupSizeSnapshotCard: View {
+    @EnvironmentObject private var model: AppModel
     let suggestion: CleanupSuggestion
 
     var body: some View {
+        let root = model.cleanupRootEvidence(for: suggestion)
         CleanupInspectorCard {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Size Over Time")
+                HStack {
+                    Text("Evidence Summary")
+                    Spacer()
+                    CleanupBadge(
+                        text: cleanupConfidence(suggestion, row: model.appRow(for: suggestion.appID)).rawValue,
+                        color: cleanupConfidenceColor(suggestion, row: model.appRow(for: suggestion.appID))
+                    )
+                }
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(DashboardTheme.primaryText)
 
-                GeometryReader { geometry in
-                    let lineY = geometry.size.height * 0.46
-                    ZStack {
-                        VStack(spacing: 0) {
-                            ForEach(0..<3, id: \.self) { _ in
-                                Rectangle()
-                                    .fill(DashboardTheme.subtleFill)
-                                    .frame(height: 1)
-                                Spacer()
-                            }
-                            Rectangle()
-                                .fill(DashboardTheme.subtleFill)
-                                .frame(height: 1)
-                        }
-
-                        Path { path in
-                            path.move(to: CGPoint(x: 0, y: lineY))
-                            path.addLine(to: CGPoint(x: geometry.size.width, y: lineY))
-                        }
-                        .stroke(DashboardTheme.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
-
-                        Circle()
-                            .fill(DashboardTheme.accent)
-                            .frame(width: 8, height: 8)
-                            .position(x: geometry.size.width - 4, y: lineY)
-                    }
+                CleanupEvidenceField(label: "Owner", value: root.owner)
+                CleanupEvidenceField(label: "Owning app", value: model.appName(for: suggestion.appID))
+                CleanupEvidenceField(label: "Category", value: suggestion.category.rawValue)
+                CleanupEvidenceField(label: "Modified", value: cleanupEvidenceDate(root.modifiedAt))
+                CleanupEvidenceField(label: "Recent app activity", value: cleanupLastUsedText(model.appRow(for: suggestion.appID)))
+                CleanupEvidenceField(label: "Observed range", value: cleanupObservedRange(suggestion, row: model.appRow(for: suggestion.appID)))
+                CleanupEvidenceField(label: "Rebuildability", value: CleanupEvidencePolicy.rebuildability(for: suggestion.category, path: suggestion.path))
+                if let app = model.appRow(for: suggestion.appID)?.app {
+                    CleanupEvidenceField(label: "Exclusions", value: CleanupEvidencePolicy.appliedExclusions(category: suggestion.category, path: suggestion.path, app: app))
                 }
-                .frame(height: 72)
 
-                HStack {
-                    Text("Current scan only")
-                    Spacer()
-                    Text(compactBytes(suggestion.sizeBytes))
-                        .monospacedDigit()
-                }
-                .font(.caption)
-                .foregroundStyle(DashboardTheme.secondaryText)
+                Text(CleanupEvidencePolicy.measurementBasis)
+                    .font(.caption)
+                    .foregroundStyle(DashboardTheme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+}
+
+private struct CleanupEvidenceField: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(DashboardTheme.secondaryText)
+                .frame(width: 112, alignment: .leading)
+            Text(value)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(DashboardTheme.primaryText)
+                .textSelection(.enabled)
+            Spacer(minLength: 0)
         }
     }
 }
@@ -3478,9 +4118,14 @@ private struct CleanupExplanationCard: View {
     var body: some View {
         CleanupInspectorCard {
             VStack(alignment: .leading, spacing: 9) {
-                Text("What is this?")
+                Text("Why this confidence?")
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(DashboardTheme.primaryText)
+                Text(CleanupEvidencePolicy.confidenceRationale(for: suggestion.category))
+                    .font(.caption)
+                    .foregroundStyle(DashboardTheme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Divider()
                 Text(suggestion.rationale)
                     .font(.caption)
                     .foregroundStyle(DashboardTheme.secondaryText)
@@ -3496,25 +4141,46 @@ private struct CleanupExplanationCard: View {
 
 private struct CleanupPreviewCard: View {
     @EnvironmentObject private var model: AppModel
+    @State private var showsAllItems = false
     let suggestion: CleanupSuggestion
 
+    init(suggestion: CleanupSuggestion) {
+        self.suggestion = suggestion
+    }
+
     var body: some View {
-        let items = model.cleanupPreviewItems(for: suggestion)
+        let allItems = model.cleanupPreviewItems(for: suggestion)
+        let items = showsAllItems ? allItems : Array(allItems.prefix(6))
         CleanupInspectorCard {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Preview of Items")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(DashboardTheme.primaryText)
+                HStack {
+                    Text("Item-Level Evidence")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(DashboardTheme.primaryText)
+                    Spacer()
+                    Text("\(allItems.count) item\(allItems.count == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(DashboardTheme.secondaryText)
+                }
                 ForEach(items) { item in
-                    HStack(spacing: 10) {
+                    HStack(alignment: .top, spacing: 10) {
                         Image(systemName: item.isDirectory ? "folder.fill" : "doc.fill")
                             .foregroundStyle(DashboardTheme.blue)
                             .frame(width: 18)
-                        Text(item.name)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(DashboardTheme.primaryText)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(item.name)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(DashboardTheme.primaryText)
+                            Text(item.path)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(DashboardTheme.secondaryText)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                            Text("\(item.owner) · modified \(cleanupEvidenceDate(item.modifiedAt))")
+                                .font(.caption)
+                                .foregroundStyle(DashboardTheme.secondaryText)
+                        }
                         Spacer()
                         Text(item.sizeBytes.map(compactBytes) ?? "Folder")
                             .font(.caption)
@@ -3530,12 +4196,75 @@ private struct CleanupPreviewCard: View {
                         Divider()
                     }
                 }
+                if allItems.count > 6 {
+                    Button(showsAllItems ? "Show fewer items" : "Show all \(allItems.count) items") {
+                        showsAllItems.toggle()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(DashboardTheme.accent)
+                }
+            }
+        }
+    }
+}
+
+private struct CleanupProtectedEvidenceCard: View {
+    @EnvironmentObject private var model: AppModel
+    let suggestion: CleanupSuggestion
+
+    var body: some View {
+        let items = model.cleanupProtectedItems(for: suggestion)
+        CleanupInspectorCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "lock.shield.fill")
+                        .foregroundStyle(DashboardTheme.orange)
+                    Text("Protected & Excluded")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(DashboardTheme.primaryText)
+                    Spacer()
+                    CleanupBadge(text: "Not selected", color: DashboardTheme.orange)
+                }
+
+                if items.isEmpty {
+                    Text("Application bundles, preferences, and containers are kept outside automatic cleanup suggestions.")
+                        .font(.caption)
+                        .foregroundStyle(DashboardTheme.secondaryText)
+                } else {
+                    ForEach(items) { item in
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(item.category.rawValue)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(DashboardTheme.primaryText)
+                                Spacer()
+                                Text(compactBytes(item.sizeBytes))
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(DashboardTheme.secondaryText)
+                            }
+                            Text(item.path)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(DashboardTheme.secondaryText)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                            if let reason = CleanupEvidencePolicy.exclusionReason(for: item.category) {
+                                Text(reason)
+                                    .font(.caption2)
+                                    .foregroundStyle(DashboardTheme.orange)
+                            }
+                        }
+                        if item.id != items.last?.id { Divider() }
+                    }
+                }
             }
         }
     }
 }
 
 private struct CleanupInspectorCard<Content: View>: View {
+    @Environment(\.colorSchemeContrast) private var accessibilityContrast
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -3548,7 +4277,10 @@ private struct CleanupInspectorCard<Content: View>: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(DashboardTheme.cardStroke)
+                .stroke(
+                    accessibilityContrast == .increased ? DashboardTheme.primaryText.opacity(0.52) : DashboardTheme.cardStroke,
+                    lineWidth: accessibilityContrast == .increased ? 1.5 : 1
+                )
         )
     }
 }
@@ -3569,7 +4301,7 @@ private struct UpdatesScreen: View {
     @EnvironmentObject private var model: AppModel
 
     private let columns = [
-        GridItem(.adaptive(minimum: 170), spacing: 12)
+        GridItem(.adaptive(minimum: 145), spacing: 12)
     ]
 
     var body: some View {
@@ -3578,16 +4310,38 @@ private struct UpdatesScreen: View {
                 .padding(.top, 6)
 
             LazyVGrid(columns: columns, spacing: 12) {
-                UpdateMetricCard(title: "Available", value: "\(model.availableUpdateCount)", systemImage: "arrow.down.circle", tint: DashboardTheme.blue, detail: "Detected updates")
+                UpdateMetricCard(title: "Available Updates", value: "\(model.availableUpdateCount)", systemImage: "arrow.down.circle", tint: DashboardTheme.blue, detail: "Version changes")
+                UpdateMetricCard(title: "Homebrew Adoption", value: "\(model.adoptableUpdateCount)", systemImage: "shippingbox", tint: DashboardTheme.orange, detail: "Management candidates")
                 UpdateMetricCard(title: "Auto Eligible", value: "\(model.autoEligibleUpdateCount)", systemImage: "bolt.circle", tint: DashboardTheme.green, detail: "Safe automatic installs")
                 UpdateMetricCard(title: "Manual", value: "\(model.manualUpdateCount)", systemImage: "hand.raised", tint: DashboardTheme.orange, detail: "Needs review")
                 UpdateMetricCard(title: "Change Logs", value: "\(model.changeLogEntries.count)", systemImage: "text.page.badge.magnifyingglass", tint: DashboardTheme.accent, detail: "Captured over time")
             }
 
-            DashboardCard {
+            if !adoptionRecords.isEmpty {
+                DashboardCard {
+                    VStack(alignment: .leading, spacing: 14) {
+                        CardHeader(title: "Homebrew Adoption Queue", subtitle: "Optional management changes — not available updates")
+                        Text("Adoption can replace the existing app bundle and moves future updates under Homebrew. Review the cask and version before continuing.")
+                            .font(.caption)
+                            .foregroundStyle(DashboardTheme.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                        VStack(spacing: 0) {
+                            UpdatesTableHeader()
+                            Divider()
+                            ForEach(adoptionRecords.prefix(120)) { record in
+                                UpdatesTableRow(record: record)
+                                Divider()
+                            }
+                        }
+                    }
+                }
+            }
+
+            if model.updateListFilter != .adoptable {
+                DashboardCard {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 10) {
-                        CardHeader(title: "Update Queue", subtitle: "\(filteredRecords.count) provider record\(filteredRecords.count == 1 ? "" : "s")")
+                        CardHeader(title: "Available Update Queue", subtitle: "\(updateQueueRecords.count) provider record\(updateQueueRecords.count == 1 ? "" : "s")")
                         if let filterTitle = model.updateListFilter?.title {
                             HStack(spacing: 8) {
                                 Label("Filtered: \(filterTitle)", systemImage: "line.3.horizontal.decrease.circle")
@@ -3617,19 +4371,20 @@ private struct UpdatesScreen: View {
                         }
                     }
 
-                    if filteredRecords.isEmpty {
+                    if updateQueueRecords.isEmpty {
                         EmptyCardState(systemImage: "arrow.down.circle", message: emptyUpdateMessage)
                             .frame(height: 220)
                     } else {
                         VStack(spacing: 0) {
                             UpdatesTableHeader()
                             Divider()
-                            ForEach(filteredRecords.prefix(120)) { record in
+                            ForEach(updateQueueRecords.prefix(120)) { record in
                                 UpdatesTableRow(record: record)
                                 Divider()
                             }
                         }
                     }
+                }
                 }
             }
 
@@ -3660,11 +4415,13 @@ private struct UpdatesScreen: View {
             model.selectAllAvailableUpdates()
         }
         .disabled(filteredRecords.isEmpty || model.isCheckingUpdates || model.isRunningUpdates)
+        .accessibilityIdentifier(AppAccessibilityIdentifier.updatesSelectAvailable)
 
         Button("Clear") {
             model.clearSelectedUpdates()
         }
         .disabled(model.selectedUpdateIDs.isEmpty)
+        .accessibilityIdentifier(AppAccessibilityIdentifier.updatesClearSelection)
     }
 
     @ViewBuilder
@@ -3675,6 +4432,7 @@ private struct UpdatesScreen: View {
             Label("Check Installed Apps", systemImage: "arrow.clockwise")
         }
         .disabled(model.isCheckingUpdates || model.isRunningUpdates)
+        .accessibilityIdentifier(AppAccessibilityIdentifier.updatesCheck)
 
         Button {
             Task { await model.updateSelectedRecords() }
@@ -3682,6 +4440,7 @@ private struct UpdatesScreen: View {
             Label("Update Selected", systemImage: "square.and.arrow.down")
         }
         .disabled(!hasSelectedInstallableUpdates || model.isCheckingUpdates || model.isRunningUpdates)
+        .accessibilityIdentifier(AppAccessibilityIdentifier.updatesRunSelected)
 
         Button {
             Task { await model.adoptAndUpdateAllRecords() }
@@ -3690,10 +4449,19 @@ private struct UpdatesScreen: View {
         }
         .disabled(model.adoptAndUpdateAllCount == 0 || model.isCheckingUpdates || model.isRunningUpdates)
         .help("Adopt every available Homebrew app and install all available Homebrew updates.")
+        .accessibilityIdentifier(AppAccessibilityIdentifier.updatesAdoptAll)
     }
 
     private var filteredRecords: [AppUpdateRecord] {
         model.filteredUpdateRecords
+    }
+
+    private var adoptionRecords: [AppUpdateRecord] {
+        filteredRecords.filter { $0.status.countsAsAdoptionCandidate }
+    }
+
+    private var updateQueueRecords: [AppUpdateRecord] {
+        filteredRecords.filter { !$0.status.countsAsAdoptionCandidate }
     }
 
     private var emptyUpdateMessage: String {
@@ -3704,6 +4472,77 @@ private struct UpdatesScreen: View {
             return "No updates match \(filterTitle)."
         }
         return "No update records match the current view."
+    }
+}
+
+private struct HomebrewAdoptionConfirmationSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let records: [AppUpdateRecord]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "shippingbox.fill")
+                    .font(.title2)
+                    .foregroundStyle(DashboardTheme.orange)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Confirm Homebrew Adoption")
+                        .font(.title2.weight(.semibold))
+                    Text("This is a management change, not an available update.")
+                        .foregroundStyle(DashboardTheme.secondaryText)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Homebrew may replace each existing app bundle with its cask artifact.", systemImage: "arrow.triangle.2.circlepath")
+                Label("Future updates will be managed through Homebrew.", systemImage: "shippingbox")
+                Label("App settings and data should remain, but quit affected apps first.", systemImage: "exclamationmark.triangle")
+            }
+            .font(.callout)
+
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(records.filter { $0.status == .adoptable }) { record in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(record.appName).font(.callout.weight(.semibold))
+                                Text("Installed \(record.currentVersion ?? "unknown") · Cask \(record.availableVersion ?? "unknown")")
+                                    .font(.caption)
+                                    .foregroundStyle(DashboardTheme.secondaryText)
+                            }
+                            Spacer()
+                            Text(record.sourceIdentifier.replacingOccurrences(of: "adopt:", with: "").replacingOccurrences(of: "replace:", with: ""))
+                                .font(.caption.monospaced())
+                                .foregroundStyle(DashboardTheme.secondaryText)
+                        }
+                        .padding(10)
+                        .background(DashboardTheme.subtleFill)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+            .frame(maxHeight: 260)
+
+            HStack {
+                Button("Cancel") {
+                    model.cancelPendingHomebrewAdoption()
+                    dismiss()
+                }
+                Spacer()
+                Button("Adopt \(adoptionCount) App\(adoptionCount == 1 ? "" : "s")") {
+                    dismiss()
+                    Task { await model.confirmPendingHomebrewAdoption() }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 600, minHeight: 460)
+    }
+
+    private var adoptionCount: Int {
+        records.filter { $0.status == .adoptable }.count
     }
 }
 
@@ -3809,12 +4648,17 @@ private struct UpdatesTableRow: View {
         HStack(spacing: 12) {
             Toggle("", isOn: Binding(
                 get: { model.selectedUpdateIDs.contains(record.id) },
-                set: { model.setUpdateSelected(record, selected: $0) }
+                set: {
+                    model.selectUpdate(record)
+                    model.setUpdateSelected(record, selected: $0)
+                }
             ))
             .labelsHidden()
             .toggleStyle(.checkbox)
             .frame(width: 24)
             .disabled(!record.canInstall)
+            .accessibilityLabel("Select \(record.appName) update")
+            .accessibilityIdentifier(AppAccessibilityIdentifier.updateSelection(record.id))
 
             HStack(spacing: 10) {
                 if let appPath = record.appPath {
@@ -3880,6 +4724,9 @@ private struct UpdatesTableRow: View {
         .onTapGesture {
             model.selectUpdate(record)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(AppAccessibilityIdentifier.updateRow(record.id))
+        .accessibilityLabel("\(record.appName), \(record.source.displayName), current \(record.currentVersion ?? "unknown"), available \(record.availableVersion ?? "unknown"), \(record.status.displayName)")
     }
 
     private var actionTitle: String {
@@ -3900,10 +4747,16 @@ private struct UpdatesTableRow: View {
 
 private struct UpdateStatusBadge: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.colorSchemeContrast) private var accessibilityContrast
     let record: AppUpdateRecord
 
     var body: some View {
-        Text(label)
+        HStack(spacing: 5) {
+            Image(systemName: systemImage)
+                .font(.system(size: 9, weight: .bold))
+                .accessibilityHidden(true)
+            Text(label)
+        }
             .font(.caption.weight(.semibold))
             .foregroundStyle(color)
             .lineLimit(1)
@@ -3911,6 +4764,10 @@ private struct UpdateStatusBadge: View {
             .padding(.vertical, 4)
             .background(color.opacity(0.12))
             .clipShape(Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(color.opacity(accessibilityContrast == .increased ? 0.95 : 0.45), lineWidth: accessibilityContrast == .increased ? 1.5 : 1)
+            }
             .help(record.message ?? label)
     }
 
@@ -3923,6 +4780,10 @@ private struct UpdateStatusBadge: View {
 
     private var color: Color {
         model.isUpdateAutoEligible(record) ? DashboardTheme.green : updateStatusColor(record.status)
+    }
+
+    private var systemImage: String {
+        model.isUpdateAutoEligible(record) ? "bolt.fill" : updateStatusIcon(record.status)
     }
 }
 
@@ -3995,6 +4856,11 @@ private struct HistoryScreen: View {
                                 HistoryTableRow(event: event, isSelected: event.id == selectedID)
                             }
                             .buttonStyle(.plain)
+                            .appAccessibleControl(
+                                id: AppAccessibilityIdentifier.historyRow(event.id),
+                                label: "\(event.title), \(event.result.label), \(event.dateText)",
+                                hint: "Show history details"
+                            )
                         }
                     }
                 }
@@ -4211,6 +5077,7 @@ private enum HistoryEventKind: Hashable {
         case .other: return DashboardTheme.secondaryText
         }
     }
+
 }
 
 private enum HistoryEventResult: Hashable {
@@ -4237,6 +5104,16 @@ private enum HistoryEventResult: Hashable {
         case .pending: return DashboardTheme.orange
         case .cancelled: return DashboardTheme.secondaryText
         case .failed: return DashboardTheme.red
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .completed: return "checkmark.circle.fill"
+        case .restored: return "arrow.uturn.backward.circle.fill"
+        case .pending: return "clock.fill"
+        case .cancelled: return "xmark.circle.fill"
+        case .failed: return "exclamationmark.octagon.fill"
         }
     }
 }
@@ -4314,6 +5191,10 @@ private struct HistoryStorageTimelineCard: View {
 
                 HistoryStorageChart(points: points)
                     .frame(height: 206)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Storage over time chart")
+                    .accessibilityValue("\(points.count) points, latest \(compactBytes(points.last?.bytes ?? 0)), \(compactBytes(reclaimedBytes)) reclaimed")
+                    .accessibilityIdentifier(AppAccessibilityIdentifier.chart("history-storage"))
 
                 HStack(spacing: 12) {
                     HistoryLegendItem(color: DashboardTheme.accent, title: "Tracked Apps", value: compactBytes(model.scannedSizeBytes))
@@ -4490,7 +5371,7 @@ private struct HistoryTableRow: View {
                     .foregroundStyle(DashboardTheme.primaryText)
                     .lineLimit(1)
                 Text(event.relativeDateText)
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(DashboardTheme.secondaryText)
                     .lineLimit(1)
             }
@@ -4587,17 +5468,26 @@ private struct HistoryIconBubble: View {
 }
 
 private struct HistoryResultBadge: View {
+    @Environment(\.colorSchemeContrast) private var accessibilityContrast
     let result: HistoryEventResult
 
     var body: some View {
         HStack(spacing: 5) {
-            Circle()
-                .fill(result.color)
-                .frame(width: 6, height: 6)
+            Image(systemName: result.systemImage)
+                .font(.system(size: 10, weight: .bold))
+                .accessibilityHidden(true)
             Text(result.label)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(result.color)
-                .lineLimit(1)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(result.color)
+        .lineLimit(1)
+        .padding(.horizontal, 7)
+        .frame(minHeight: 24)
+        .background(result.color.opacity(0.1))
+        .clipShape(Capsule())
+        .overlay {
+            Capsule()
+                .stroke(result.color.opacity(accessibilityContrast == .increased ? 0.95 : 0.45), lineWidth: accessibilityContrast == .increased ? 1.5 : 1)
         }
     }
 }
@@ -4886,6 +5776,8 @@ private func historyShortDate(_ date: Date?) -> String {
 
 private struct SettingsScreen: View {
     @EnvironmentObject private var model: AppModel
+    @State private var showsDeleteHistoryConfirmation = false
+    @State private var showsRevokeAuthorizationConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -4929,6 +5821,86 @@ private struct SettingsScreen: View {
                     DashboardDetailLine(title: "Next Full Scan", value: AppMonitorFormatting.shortDateTime(model.scanSchedule.nextScanAt))
                     DashboardDetailLine(title: "Launch at Login", value: model.loginItemStatus)
                     Toggle("Show ignored apps in tables", isOn: $model.includeIgnoredApps)
+                    Divider()
+                    SettingsSectionHeader(title: "Privacy & Data", systemImage: "hand.raised")
+                    Text("Activity monitoring is local and ready. App Monitor records the active app's name, bundle identifier, path, start and end time, and duration. It does not record window titles, keystrokes, screen contents, microphone audio, or document contents.")
+                        .font(.caption)
+                        .foregroundStyle(DashboardTheme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    DashboardDetailLine(title: "Permission", value: "Ready — no Screen Recording or Accessibility access required")
+                    DashboardDetailLine(title: "Measurement Started", value: AppMonitorFormatting.shortDateTime(model.trackingStartedAt))
+                    DashboardDetailLine(title: "Retained Activity", value: monitoringCoverageText)
+                    Picker("Keep measured activity", selection: Binding(
+                        get: { model.monitoringRetention },
+                        set: { model.updateMonitoringRetention($0) }
+                    )) {
+                        ForEach(AppModel.MonitoringRetention.allCases) { retention in
+                            Text(retention.title).tag(retention)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Toggle("Import Spotlight usage summaries", isOn: Binding(
+                        get: { model.spotlightHistoryImportEnabled },
+                        set: { model.updateSpotlightHistoryImport(enabled: $0) }
+                    ))
+                    Text("The retention limit applies to locally measured app-activity events. Imported Spotlight summaries remain available until monitoring history is deleted.")
+                        .font(.caption)
+                        .foregroundStyle(DashboardTheme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 12) {
+                        DashboardDetailLine(title: "Local Storage", value: model.localDataLocation)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Show in Finder") { model.openLocalDataFolder() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                    HStack(spacing: 12) {
+                        DashboardDetailLine(title: "Ignored Apps", value: "\(model.ignoredAppIDs.count) excluded from default tables and analytics")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Review") { model.reviewIgnoredApps() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(model.ignoredAppIDs.isEmpty)
+                    }
+                    HStack(spacing: 10) {
+                        Button {
+                            model.exportMonitoringHistory()
+                        } label: {
+                            Label("Export Activity CSV", systemImage: "square.and.arrow.up")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        Button(role: .destructive) {
+                            showsDeleteHistoryConfirmation = true
+                        } label: {
+                            Label("Delete Monitoring History", systemImage: "trash")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Label("Homebrew administrator authorization", systemImage: "key.horizontal")
+                                .foregroundStyle(DashboardTheme.primaryText)
+                            Text(model.homebrewAuthorizationStatus)
+                                .font(.caption)
+                                .foregroundStyle(DashboardTheme.secondaryText)
+                        }
+                        Spacer()
+                        Button(role: .destructive) {
+                            showsRevokeAuthorizationConfirmation = true
+                        } label: {
+                            Label("Revoke", systemImage: "key.slash")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(model.isRunningUpdates || model.homebrewAuthorizationStatus != "Saved in this Mac's Keychain")
+                        .help("Remove App Monitor's saved Homebrew administrator password from this Mac's Keychain.")
+                    }
+                    Text("When Homebrew needs administrator access, App Monitor can save the password in this Mac's Keychain for later updates. Revoking it does not change Homebrew or uninstall software; the next eligible update will ask again.")
+                        .font(.caption)
+                        .foregroundStyle(DashboardTheme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
                     Divider()
                     SettingsSectionHeader(title: "Update App Monitor", systemImage: "app.badge")
                     Text("Controls updates for App Monitor itself.")
@@ -5004,20 +5976,6 @@ private struct SettingsScreen: View {
                         get: { model.updateSettings.includeHomebrewFormulae },
                         set: { model.updateUpdateSourceSettings(includeHomebrewFormulae: $0) }
                     ))
-                    HStack(spacing: 12) {
-                        Label("Homebrew authorization", systemImage: "key.horizontal")
-                            .foregroundStyle(DashboardTheme.primaryText)
-                        Spacer()
-                        Button {
-                            Task { await model.forgetSavedHomebrewAdministratorPassword() }
-                        } label: {
-                            Label("Forget Saved Password", systemImage: "trash")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(model.isRunningUpdates)
-                        .help("Remove App Monitor's saved Homebrew administrator password from your Mac Keychain.")
-                    }
                     Toggle("Include macOS and Safari updates", isOn: Binding(
                         get: { model.updateSettings.includeAppleSoftwareUpdates },
                         set: { model.updateUpdateSourceSettings(includeAppleSoftwareUpdates: $0) }
@@ -5065,6 +6023,36 @@ private struct SettingsScreen: View {
                 }
             }
         }
+        .accessibilityIdentifier(AppAccessibilityIdentifier.settingsScreen)
+        .task {
+            await model.refreshPrivacyState()
+        }
+        .alert("Delete all monitoring history?", isPresented: $showsDeleteHistoryConfirmation) {
+            Button("Delete History", role: .destructive) { model.deleteMonitoringHistory() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes locally measured activity events and imported Spotlight usage history from App Monitor. Spotlight history import will be turned off so deleted summaries do not return automatically. App inventory, settings, scans, updates, and quarantine records are kept. New local activity measurement begins immediately.")
+        }
+        .alert("Revoke saved Homebrew authorization?", isPresented: $showsRevokeAuthorizationConfirmation) {
+            Button("Revoke Authorization", role: .destructive) {
+                Task { await model.forgetSavedHomebrewAdministratorPassword() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("App Monitor will remove its saved administrator password from this Mac's Keychain. A future Homebrew operation that needs administrator access will ask again.")
+        }
+    }
+
+    private var monitoringCoverageText: String {
+        let summary = model.monitoringHistorySummary
+        guard summary.eventCount > 0 else {
+            return summary.importedAppCount > 0
+                ? "No measured events; Spotlight summaries for \(summary.importedAppCount) apps"
+                : "No activity retained yet"
+        }
+        let first = AppMonitorFormatting.shortDateTime(summary.earliestEventAt)
+        let last = AppMonitorFormatting.shortDateTime(summary.latestEventAt)
+        return "\(summary.eventCount) events from \(first) through \(last)"
     }
 }
 
@@ -5505,7 +6493,7 @@ private struct TopStorageAppRow: View {
             }
             .frame(height: 6)
 
-            Text(compactBytes(row.totalSizeBytes))
+            Text(row.scannedTotalSizeBytes.map(compactBytes) ?? "Not scanned")
                 .font(.caption)
                 .foregroundStyle(DashboardTheme.primaryText)
                 .monospacedDigit()
@@ -5771,157 +6759,23 @@ private struct DashboardDetailLine: View {
 
 private struct DashboardToolbar: View {
     @EnvironmentObject private var model: AppModel
-    @Binding var showsCleanupNotice: Bool
 
     var body: some View {
-        VStack(spacing: 10) {
+        if showsToolbar || showsProgress {
+            VStack(spacing: 10) {
             HStack(spacing: 10) {
-                SearchField(text: $model.searchText, focusToken: model.searchFocusToken)
-                    .frame(width: 240)
+                if showsSearch {
+                    SearchField(text: $model.searchText, focusToken: model.searchFocusToken)
+                        .frame(width: 240)
+                }
 
                 Spacer()
 
-                Menu {
-                    if model.destination == .cleanup {
-                        Button {} label: {
-                            Label("This Mac", systemImage: "checkmark")
-                        }
-                    } else {
-                        ForEach(ReportingPeriod.allCases) { period in
-                            Button {
-                                model.period = period
-                            } label: {
-                                if model.period == period {
-                                    Label(period.rawValue, systemImage: "checkmark")
-                                } else {
-                                    Text(period.rawValue)
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    ToolbarControl(
-                        title: model.destination == .cleanup ? "This Mac" : model.period.rawValue,
-                        systemImage: model.destination == .cleanup ? "desktopcomputer" : "calendar",
-                        trailingSystemImage: "chevron.down",
-                        compact: true
-                    )
+                if model.destination == .overview {
+                    ReportingPeriodMenu()
                 }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
 
-                Menu {
-                    Toggle("Show all bundles", isOn: $model.includeAllBundles)
-                    Toggle("Show ignored apps", isOn: $model.includeIgnoredApps)
-                    Toggle("Warnings only", isOn: $model.filterState.warningsOnly)
-                    Toggle("Cleanup candidates only", isOn: $model.filterState.cleanupOnly)
-                    Toggle("Hide protected apps", isOn: $model.filterState.hideProtectedApps)
-                    Divider()
-                    Menu("Storage category") {
-                        Button("Any Category") {
-                            model.filterState.category = nil
-                        }
-                        ForEach(StorageCategory.allCases) { category in
-                            Button {
-                                model.filterState.category = category
-                            } label: {
-                                if model.filterState.category == category {
-                                    Label(category.rawValue, systemImage: "checkmark")
-                                } else {
-                                    Text(category.rawValue)
-                                }
-                            }
-                        }
-                    }
-                    Menu("Storage threshold") {
-                        Button("Any Size") { model.filterState.minimumStorageBytes = 0 }
-                        Button("100 MB+") { model.filterState.minimumStorageBytes = 100_000_000 }
-                        Button("500 MB+") { model.filterState.minimumStorageBytes = 500_000_000 }
-                        Button("1 GB+") { model.filterState.minimumStorageBytes = 1_000_000_000 }
-                    }
-                    Menu("Usage time") {
-                        ForEach(AppUsageTimeFilter.allCases) { usageTime in
-                            Button {
-                                model.filterState.usageTime = usageTime
-                            } label: {
-                                if model.filterState.usageTime == usageTime {
-                                    Label(usageTime.rawValue, systemImage: "checkmark")
-                                } else {
-                                    Text(usageTime.rawValue)
-                                }
-                            }
-                        }
-                    }
-                    Menu("Date range") {
-                        ForEach(AppDateRangeFilter.allCases) { range in
-                            Button {
-                                model.filterState.dateRange = range
-                            } label: {
-                                if model.filterState.dateRange == range {
-                                    Label(range.rawValue, systemImage: "checkmark")
-                                } else {
-                                    Text(range.rawValue)
-                                }
-                            }
-                        }
-                    }
-                    Divider()
-                    Button("Save Current Filter") {
-                        model.saveCurrentFilter()
-                    }
-                    if !model.savedFilters.isEmpty {
-                        Menu("Saved Filters") {
-                            ForEach(model.savedFilters) { filter in
-                                Button(filter.name) {
-                                    model.applySavedFilter(filter)
-                                }
-                            }
-                        }
-                    }
-                    Button("Clear Filters") {
-                        model.clearFilters()
-                    }
-                    Divider()
-                    Button("Sort by usage") {
-                        model.sortKey = .usage
-                        model.sortAscending = false
-                    }
-                    Button("Sort by storage") {
-                        model.sortKey = .totalSize
-                        model.sortAscending = false
-                    }
-                    Button("Sort by name") {
-                        model.sortKey = .app
-                        model.sortAscending = true
-                    }
-                    if model.destination != .cleanup {
-                        Divider()
-                        Menu("Export") {
-                            Button("Summary CSV") {
-                                model.exportUsageSummary()
-                            }
-                            Button("Trend Buckets CSV") {
-                                model.exportUsageTrendBuckets()
-                            }
-                            Button("Top Apps CSV") {
-                                model.exportTopApps()
-                            }
-                            Button("Heatmap CSV") {
-                                model.exportUsageHeatmap()
-                            }
-                            Divider()
-                            Button("Current App Table CSV") {
-                                model.exportCurrentRows()
-                            }
-                        }
-                    }
-                } label: {
-                    ToolbarControl(title: "Options", systemImage: "slider.horizontal.3", compact: true)
-                }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-
-                if model.destination != .cleanup {
+                if [.overview, .storage, .largeFiles, .warnings].contains(model.destination) {
                     Button {
                         Task { await model.runFullScan() }
                     } label: {
@@ -5929,32 +6783,49 @@ private struct DashboardToolbar: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(model.isScanningStorage)
+                    .help("Refresh storage and health data")
+                    .accessibilityLabel("Run storage scan")
                 }
 
-                Button {
-                    Task { await model.checkForUpdates() }
-                } label: {
-                    ToolbarControl(title: model.isCheckingUpdates ? "Checking" : "Updates", systemImage: "arrow.down.circle", compact: true)
-                }
-                .buttonStyle(.plain)
-                .disabled(model.isCheckingUpdates || model.isRunningUpdates)
-
-                Button {
-                    if model.destination == .cleanup {
-                        Task { await model.runFullScan() }
-                    } else {
-                        model.navigate(.cleanup)
+                if model.destination == .overview {
+                    Button {
+                        model.showUpdates()
+                    } label: {
+                        ToolbarControl(title: "Open Updates", systemImage: "arrow.down.circle", compact: true)
                     }
-                } label: {
-                    ToolbarControl(
-                        title: model.destination == .cleanup ? "Rescan" : "Cleanup",
-                        systemImage: model.destination == .cleanup ? "arrow.clockwise" : "sparkles",
-                        isProminent: true,
-                        compact: true
-                    )
+                    .buttonStyle(.plain)
+                    .help("Open the installed app updates workspace")
+                    .accessibilityLabel("Open Updates")
+
+                    Button {
+                        model.navigate(.cleanup)
+                    } label: {
+                        ToolbarControl(title: "Review Cleanup", systemImage: "shield.lefthalf.filled", compact: true)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Review cleanup candidates before moving anything to quarantine")
+                    .accessibilityLabel("Review Cleanup")
+                } else if model.destination == .updates {
+                    Button {
+                        Task { await model.checkForUpdates() }
+                    } label: {
+                        ToolbarControl(title: model.isCheckingUpdates ? "Checking" : "Check for Updates", systemImage: "arrow.clockwise", compact: true)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.isCheckingUpdates || model.isRunningUpdates)
+                    .help("Check all installed app update providers")
+                    .accessibilityLabel("Check for app updates")
+                } else if model.destination == .cleanup {
+                    Button {
+                        Task { await model.runFullScan() }
+                    } label: {
+                        ToolbarControl(title: model.isScanningStorage ? "Scanning" : "Rescan", systemImage: "arrow.clockwise", compact: true)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.isScanningStorage)
+                    .help("Regenerate cleanup suggestions from a fresh scan")
+                    .accessibilityLabel("Rescan cleanup candidates")
                 }
-                .buttonStyle(.plain)
-                .disabled(model.destination == .cleanup && model.isScanningStorage)
 
                 if model.hasInspectorContent {
                     Button {
@@ -5969,6 +6840,8 @@ private struct DashboardToolbar: View {
                     .buttonStyle(.plain)
                     .help(model.isInspectorVisible ? "Hide the detail inspector" : "Show details for the selected item")
                     .accessibilityLabel(model.isInspectorVisible ? "Hide details" : "Show details")
+                    .accessibilityIdentifier(AppAccessibilityIdentifier.inspectorToggle)
+                    .appKeyboardFocusRing()
                 }
             }
 
@@ -5983,10 +6856,25 @@ private struct DashboardToolbar: View {
             if model.isCheckingUpdates || model.isRunningUpdates {
                 OperationProgressStrip(progress: visibleUpdateProgress, tint: DashboardTheme.blue)
             }
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
+            .background(DashboardTheme.canvas)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 16)
-        .background(DashboardTheme.canvas)
+    }
+
+    private var showsSearch: Bool {
+        model.destination == .usageTable || model.destination == .warnings
+    }
+
+    private var showsToolbar: Bool {
+        showsSearch
+            || [.overview, .storage, .largeFiles, .warnings, .updates, .cleanup].contains(model.destination)
+            || model.hasInspectorContent
+    }
+
+    private var showsProgress: Bool {
+        model.isScanningStorage || model.isRunningCleanup || model.isCheckingUpdates || model.isRunningUpdates
     }
 
     private var visibleScanProgress: OperationProgressSnapshot {
@@ -6032,6 +6920,32 @@ private struct DashboardToolbar: View {
             )
         }
         return model.updateProgress
+    }
+}
+
+private struct ReportingPeriodMenu: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        Menu {
+            ForEach(ReportingPeriod.allCases) { period in
+                Button {
+                    model.period = period
+                } label: {
+                    if model.period == period {
+                        Label(period.rawValue, systemImage: "checkmark")
+                    } else {
+                        Text(period.rawValue)
+                    }
+                }
+            }
+        } label: {
+            ToolbarControl(title: model.period.rawValue, systemImage: "calendar", trailingSystemImage: "chevron.down", compact: true)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .help("Change the reporting period")
+        .accessibilityLabel("Reporting period: \(model.period.rawValue)")
     }
 }
 
@@ -6151,13 +7065,37 @@ private struct UsageTrendsWorkspace: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ScreenHeader(title: "Usage Trends", subtitle: "Understand how you use your Mac over time.")
-                .padding(.top, 6)
+            HStack(alignment: .bottom, spacing: 12) {
+                ScreenHeader(title: "Usage Trends", subtitle: "Understand how you use your Mac over time.")
+                Spacer()
+                ReportingPeriodMenu()
+                UsageAnalyticsExportMenu()
+            }
+            .padding(.top, 6)
 
             UsageSummaryMetricGrid(snapshot: model.usageAnalytics)
             UsageOverTimeCard()
-            UsageHeatmapCard()
+            AccessibleUsageHeatmapCard()
         }
+    }
+}
+
+private struct UsageAnalyticsExportMenu: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        Menu {
+            Button("Summary CSV") { model.exportUsageSummary() }
+            Button("Trend Buckets CSV") { model.exportUsageTrendBuckets() }
+            Button("Top Apps CSV") { model.exportTopApps() }
+            Button("Heatmap CSV") { model.exportUsageHeatmap() }
+        } label: {
+            ToolbarControl(title: "Export", systemImage: "square.and.arrow.up", compact: true)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .help("Export usage analytics from this workspace")
+        .accessibilityLabel("Export usage analytics")
     }
 }
 
@@ -6377,6 +7315,7 @@ private struct UsageStackedTrendChart: View {
             }
         }
         .accessibilityLabel("Usage over time chart")
+        .accessibilityIdentifier(AppAccessibilityIdentifier.chart("usage-over-time"))
     }
 
     private var labelHeight: CGFloat {
@@ -6436,13 +7375,13 @@ private struct UsageStackLegend: View {
     }
 }
 
-private struct UsageHeatmapCard: View {
+private struct AccessibleUsageHeatmapCard: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
         DashboardCard {
             VStack(alignment: .leading, spacing: 14) {
-                CardHeader(title: "Usage Heatmap", subtitle: "Time-of-day density")
+                CardHeader(title: "Usage Heatmap", subtitle: "Time-of-day density with a sortable data table")
 
                 if model.usageAnalytics.summary.totalSeconds <= 0 {
                     EmptyCardState(systemImage: "square.grid.3x3", message: "No usage recorded for this period.")
@@ -6450,6 +7389,17 @@ private struct UsageHeatmapCard: View {
                 } else {
                     UsageHeatmapGrid(cells: model.usageAnalytics.heatmapCells)
                         .frame(minHeight: heatmapHeight)
+
+                    UsageHeatmapTotals(cells: model.usageAnalytics.heatmapCells)
+
+                    Divider()
+
+                    Text("Sortable data table")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(DashboardTheme.primaryText)
+
+                    UsageHeatmapTable(cells: model.usageAnalytics.heatmapCells)
+                        .frame(minHeight: 280, maxHeight: 420)
                 }
             }
         }
@@ -6457,12 +7407,17 @@ private struct UsageHeatmapCard: View {
 
     private var heatmapHeight: CGFloat {
         let rowCount = Set(model.usageAnalytics.heatmapCells.map(\.rowLabel)).count
-        return CGFloat(max(7, rowCount)) * 18 + 38
+        return CGFloat(max(1, rowCount)) * 18 + 38
     }
 }
 
 private struct UsageHeatmapGrid: View {
     let cells: [UsageHeatmapCell]
+    @State private var selectedCellID: String?
+
+    init(cells: [UsageHeatmapCell]) {
+        self.cells = cells
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -6486,16 +7441,33 @@ private struct UsageHeatmapGrid: View {
                         .frame(width: 54, alignment: .trailing)
 
                     ForEach(row.cells) { cell in
-                        RoundedRectangle(cornerRadius: 2, style: .continuous)
-                            .fill(heatmapColor(for: cell.seconds, maxSeconds: maxSeconds))
+                        Button {
+                            selectedCellID = cell.id
+                        } label: {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                    .fill(heatmapColor(for: cell.seconds, maxSeconds: maxSeconds))
+                                if selectedCellID == cell.id {
+                                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                        .stroke(DashboardTheme.primaryText, lineWidth: 2)
+                                }
+                            }
                             .frame(maxWidth: .infinity)
                             .frame(height: 12)
-                            .help(heatmapTooltip(cell))
-                            .accessibilityLabel("\(cell.rowLabel) \(cell.hourOfDay):00 \(AppMonitorFormatting.duration(cell.seconds))")
+                        }
+                        .buttonStyle(.plain)
+                        .help(heatmapTooltip(cell))
+                        .accessibilityLabel(heatmapAccessibilityValue(cell))
+                        .accessibilityHint("Select this data point. Cells are ordered by day, then hour; the table below provides sortable columns.")
+                        .accessibilityIdentifier("usage-heatmap-cell-\(cell.id)")
                     }
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("\(row.label) heatmap row")
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Usage heatmap chart")
     }
 
     private var rows: [HeatmapDisplayRow] {
@@ -6517,6 +7489,98 @@ private struct UsageHeatmapGrid: View {
 
     private var maxSeconds: TimeInterval {
         max(cells.map(\.seconds).max() ?? 1, 1)
+    }
+}
+
+private struct UsageHeatmapTable: View {
+    let cells: [UsageHeatmapCell]
+    @State private var sortOrder = [KeyPathComparator(\HeatmapTableRow.rowStart)]
+
+    init(cells: [UsageHeatmapCell]) {
+        self.cells = cells
+    }
+
+    var body: some View {
+        Table(sortedRows, sortOrder: $sortOrder) {
+            TableColumn("Day", value: \.rowStart) { row in
+                Text(row.day)
+            }
+            .width(min: 86, ideal: 110)
+
+            TableColumn("Hour", value: \.hourOfDay) { row in
+                Text(heatmapHourRange(row.hourOfDay))
+                    .monospacedDigit()
+            }
+            .width(min: 84, ideal: 100)
+
+            TableColumn("Duration", value: \.seconds) { row in
+                Text(AppMonitorFormatting.duration(row.seconds))
+                    .monospacedDigit()
+            }
+            .width(min: 78, ideal: 96)
+
+            TableColumn("Sessions", value: \.sessionCount) { row in
+                Text("\(row.sessionCount)")
+                    .monospacedDigit()
+            }
+            .width(min: 68, ideal: 80)
+
+            TableColumn("Top App", value: \.topAppName) { row in
+                Text(row.topAppName)
+                    .lineLimit(1)
+            }
+            .width(min: 120, ideal: 180)
+        }
+        .accessibilityLabel("Usage heatmap data table")
+        .accessibilityHint("Select a column header to sort the heatmap data.")
+    }
+
+    private var sortedRows: [HeatmapTableRow] {
+        cells.map(HeatmapTableRow.init).sorted(using: sortOrder)
+    }
+}
+
+private struct HeatmapTableRow: Identifiable {
+    let id: String
+    let rowStart: Date
+    let day: String
+    let hourOfDay: Int
+    let seconds: TimeInterval
+    let sessionCount: Int
+    let topAppName: String
+
+    init(cell: UsageHeatmapCell) {
+        id = cell.id
+        rowStart = cell.rowStart
+        day = cell.rowLabel
+        hourOfDay = cell.hourOfDay
+        seconds = cell.seconds
+        sessionCount = cell.sessionCount
+        topAppName = cell.topAppName ?? "None"
+    }
+}
+
+private struct UsageHeatmapTotals: View {
+    let cells: [UsageHeatmapCell]
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Label("\(cells.count) hourly cells", systemImage: "square.grid.3x3")
+            Label(AppMonitorFormatting.duration(totalSeconds), systemImage: "clock")
+            Label("\(activeCellCount) active", systemImage: "waveform.path.ecg")
+        }
+        .font(.caption)
+        .foregroundStyle(DashboardTheme.secondaryText)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Heatmap totals: \(cells.count) hourly cells, \(AppMonitorFormatting.duration(totalSeconds)) total duration, \(activeCellCount) active cells")
+    }
+
+    private var totalSeconds: TimeInterval {
+        cells.reduce(0) { $0 + $1.seconds }
+    }
+
+    private var activeCellCount: Int {
+        cells.count { $0.seconds > 0 }
     }
 }
 
@@ -6762,6 +7826,7 @@ private struct TimelineSessionDetailCard: View {
 }
 
 private struct WarningInspectorPanel: View {
+    @EnvironmentObject private var model: AppModel
     let row: AppUsageRow
     let warning: AppWarningItem?
 
@@ -6776,9 +7841,76 @@ private struct WarningInspectorPanel: View {
                 WarningDetailBlock(title: "Recommendation", text: warning.recommendation)
                 WarningDetailsList(warning: warning)
                 WarningAffectedItemsList(warning: warning)
+                WarningTriageHistoryBlock(
+                    disposition: model.warningDisposition(for: warning),
+                    isCurrentlyPresent: model.warningIsCurrentlyPresent(warning),
+                    events: model.warningHistory(for: warning)
+                )
             } else {
                 EmptyCardState(systemImage: "checkmark.seal", message: "Select a warning to inspect severity, affected paths, and recommended actions.")
                     .frame(height: 180)
+            }
+        }
+    }
+}
+
+private struct WarningTriageHistoryBlock: View {
+    let disposition: AppWarningDisposition
+    let isCurrentlyPresent: Bool
+    let events: [AppWarningTriageEvent]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Triage History")
+                    .font(.headline)
+                    .foregroundStyle(DashboardTheme.primaryText)
+                Spacer()
+                Text(disposition.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(disposition == .open ? DashboardTheme.orange : DashboardTheme.accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background((disposition == .open ? DashboardTheme.orange : DashboardTheme.accent).opacity(0.12))
+                    .clipShape(Capsule())
+            }
+
+            Label(
+                isCurrentlyPresent ? "Present in the latest scan" : "Not present in the latest scan",
+                systemImage: isCurrentlyPresent ? "exclamationmark.triangle.fill" : "checkmark.seal.fill"
+            )
+            .font(.caption)
+            .foregroundStyle(isCurrentlyPresent ? DashboardTheme.orange : DashboardTheme.green)
+
+            if events.isEmpty {
+                Text("No triage actions recorded yet.")
+                    .font(.caption)
+                    .foregroundStyle(DashboardTheme.secondaryText)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(events.prefix(8)) { event in
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(event.action)
+                                    .font(.caption.weight(.semibold))
+                                Spacer()
+                                Text(AppMonitorFormatting.shortDateTime(event.createdAt))
+                                    .font(.caption2)
+                                    .foregroundStyle(DashboardTheme.secondaryText)
+                            }
+                            Text(event.detail)
+                                .font(.caption)
+                                .foregroundStyle(DashboardTheme.secondaryText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.vertical, 8)
+                        if event.id != events.prefix(8).last?.id { Divider() }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .background(DashboardTheme.card)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(DashboardTheme.softStroke))
             }
         }
     }
@@ -6966,30 +8098,100 @@ private struct WarningInspectorFooter: View {
     @EnvironmentObject private var model: AppModel
     let row: AppUsageRow
     let warning: AppWarningItem?
+    @State private var showingEvidence = false
+
+    init(row: AppUsageRow, warning: AppWarningItem?) {
+        self.row = row
+        self.warning = warning
+    }
 
     var body: some View {
-        VStack(spacing: 12) {
-            Button {
-                model.openWarningHelp(warning)
-            } label: {
-                Text("Learn More")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 36)
-                    .background(DashboardTheme.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-            .buttonStyle(.plain)
+        VStack(spacing: 10) {
+            if let warning {
+                HStack(spacing: 8) {
+                    Button("View Evidence") { showingEvidence = true }
+                        .buttonStyle(DetailFooterButtonStyle())
+                    Button("Recheck") {
+                        Task { await model.recheckWarning(warning) }
+                    }
+                    .buttonStyle(DetailFooterButtonStyle())
+                }
 
-            Button {
-                model.revealInFinder(path: warning?.appPath ?? row.app.path)
-            } label: {
-                Text("Reveal in Finder")
-                    .frame(maxWidth: .infinity)
+                HStack(spacing: 8) {
+                    Button {
+                        model.setWarningDisposition(.acknowledged, for: warning)
+                    } label: {
+                        Text("Acknowledge")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 36)
+                            .background(DashboardTheme.accent)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.warningDisposition(for: warning) == .acknowledged)
+
+                    Button("Verify Fix") {
+                        Task { await model.verifyWarningFix(warning) }
+                    }
+                    .buttonStyle(DetailFooterButtonStyle())
+                }
+
+                Menu {
+                    Button("Ignore") { model.setWarningDisposition(.ignored, for: warning) }
+                    Button("Mark as False Positive") { model.setWarningDisposition(.falsePositive, for: warning) }
+                    Divider()
+                    Button("Reopen") { model.setWarningDisposition(.open, for: warning) }
+                    Button("Learn More") { model.openWarningHelp(warning) }
+                    Button("Reveal in Finder") { model.revealInFinder(path: warning.appPath) }
+                } label: {
+                    Text("More Actions")
+                        .frame(maxWidth: .infinity)
+                }
+                .menuStyle(.borderlessButton)
+            } else {
+                Button("Reveal in Finder") {
+                    model.revealInFinder(path: row.app.path)
+                }
+                .buttonStyle(DetailFooterButtonStyle())
             }
-            .buttonStyle(DetailFooterButtonStyle())
         }
+        .sheet(isPresented: $showingEvidence) {
+            if let warning {
+                WarningEvidenceSheet(warning: warning)
+            }
+        }
+    }
+}
+
+private struct WarningEvidenceSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let warning: AppWarningItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Warning Evidence")
+                        .font(.title2.weight(.semibold))
+                    Text("\(warning.appName) · \(warning.title)")
+                        .foregroundStyle(DashboardTheme.secondaryText)
+                }
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+
+            WarningDetailBlock(title: "Observed", text: warning.detail)
+            WarningDetailBlock(title: "Source", text: warning.source)
+            WarningDetailBlock(title: "Affected Path", text: primaryAffectedPath(for: warning))
+            WarningDetailBlock(title: "Detected", text: AppMonitorFormatting.shortDateTime(warning.detectedAt))
+            WarningDetailBlock(title: "Recommended Next Step", text: warning.recommendation)
+            Spacer()
+        }
+        .padding(24)
+        .frame(minWidth: 560, minHeight: 460)
     }
 }
 
@@ -7370,7 +8572,7 @@ private struct DetailStorageSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Storage", trailing: compactBytes(row.totalSizeBytes))
+            SectionHeader(title: "Storage", trailing: row.scannedTotalSizeBytes.map(compactBytes) ?? "Not scanned")
 
             if summaries.isEmpty {
                 EmptyCardState(systemImage: "internaldrive", message: "Storage details appear after a scan.")
@@ -7828,74 +9030,192 @@ private struct UninstallPlanItemRow: View {
     }
 }
 
-private struct SummaryCard: View {
+private struct OverviewSectionHeader: View {
     let title: String
-    let systemImage: String
-    let value: String
-    let unit: String?
     let subtitle: String
-    let footer: String
-    let footerSystemImage: String
-    let tint: Color
-    var isSoftGreen = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(tint)
-                Text(title)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(DashboardTheme.primaryText)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.82)
-            }
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(DashboardTheme.primaryText)
+            Text(subtitle)
+                .font(.callout)
+                .foregroundStyle(DashboardTheme.secondaryText)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text(value)
-                        .font(.system(size: 32, weight: .semibold, design: .rounded))
-                        .foregroundStyle(DashboardTheme.primaryText)
-                        .minimumScaleFactor(0.72)
-                        .lineLimit(1)
-                    if let unit {
-                        Text(unit)
-                            .font(.callout.weight(.medium))
-                            .foregroundStyle(DashboardTheme.primaryText)
-                    }
-                }
-                Text(subtitle)
-                    .font(.callout)
+private struct OverviewFreshnessBadge: View {
+    let lastScan: Date?
+    let isScanning: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: isScanning ? "arrow.triangle.2.circlepath" : freshnessIcon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(freshnessTint)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(isScanning ? "Scan in progress" : freshnessTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(DashboardTheme.primaryText)
+                Text(isScanning ? "Refreshing dashboard data" : freshnessDetail)
+                    .font(.caption2)
                     .foregroundStyle(DashboardTheme.secondaryText)
             }
-
-            Divider()
-
-            HStack(spacing: 6) {
-                Image(systemName: footerSystemImage)
-                    .font(.caption)
-                Text(footer)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            .font(.caption)
-            .foregroundStyle(tint)
         }
-        .padding(16)
-        .frame(minHeight: 174, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isSoftGreen ? Color.green.opacity(0.06) : DashboardTheme.card)
-        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(DashboardTheme.panel)
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(isSoftGreen ? DashboardTheme.green.opacity(0.17) : DashboardTheme.cardStroke)
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(freshnessTint.opacity(0.22))
         )
+        .accessibilityElement(children: .combine)
+    }
+
+    private var freshnessTitle: String {
+        guard let lastScan else { return "Not scanned yet" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return "Scanned \(formatter.localizedString(for: lastScan, relativeTo: Date()))"
+    }
+
+    private var freshnessDetail: String {
+        guard let lastScan else { return "Run Scan to establish a baseline" }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: lastScan)
+    }
+
+    private var freshnessIcon: String {
+        guard let lastScan else { return "exclamationmark.circle.fill" }
+        return Date().timeIntervalSince(lastScan) <= 86_400 ? "checkmark.circle.fill" : "clock.badge.exclamationmark.fill"
+    }
+
+    private var freshnessTint: Color {
+        guard let lastScan else { return DashboardTheme.orange }
+        return Date().timeIntervalSince(lastScan) <= 86_400 ? DashboardTheme.green : DashboardTheme.orange
+    }
+}
+
+private struct OverviewPriorityCard: View {
+    let title: String
+    let value: String
+    let definition: String
+    let actionTitle: String
+    let systemImage: String
+    let tint: Color
+    let action: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 18) {
+            Image(systemName: systemImage)
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 54, height: 54)
+                .background(tint.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(DashboardTheme.primaryText)
+                Text(definition)
+                    .font(.callout)
+                    .foregroundStyle(DashboardTheme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 16)
+
+            Text(value)
+                .font(.system(size: 30, weight: .semibold, design: .rounded))
+                .foregroundStyle(DashboardTheme.primaryText)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+
+            Button(actionTitle, action: action)
+                .buttonStyle(.borderedProminent)
+                .tint(tint)
+                .controlSize(.large)
+        }
+        .padding(18)
+        .background(tint.opacity(0.075))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(tint.opacity(0.28))
+        )
+        .accessibilityElement(children: .contain)
+    }
+}
+
+private struct OverviewDecisionMetric: View {
+    let title: String
+    let value: String
+    let definition: String
+    let actionTitle: String
+    let systemImage: String
+    let tint: Color
+    var emphasized = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(tint)
+                    Text(title)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(DashboardTheme.primaryText)
+                    Spacer(minLength: 6)
+                    Text(value)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(DashboardTheme.primaryText)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
+
+                Text(definition)
+                    .font(.caption)
+                    .foregroundStyle(DashboardTheme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 2)
+
+                HStack(spacing: 6) {
+                    Text(actionTitle)
+                    Image(systemName: "arrow.right")
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
+            .background(emphasized ? tint.opacity(0.075) : DashboardTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(emphasized ? tint.opacity(0.25) : DashboardTheme.cardStroke)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title), \(value). \(definition). \(actionTitle)")
     }
 }
 
 private struct DashboardCard<Content: View>: View {
+    @Environment(\.colorSchemeContrast) private var accessibilityContrast
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -7907,7 +9227,10 @@ private struct DashboardCard<Content: View>: View {
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(DashboardTheme.cardStroke)
+                .stroke(
+                    accessibilityContrast == .increased ? DashboardTheme.primaryText.opacity(0.52) : DashboardTheme.cardStroke,
+                    lineWidth: accessibilityContrast == .increased ? 1.5 : 1
+                )
         )
     }
 }
@@ -8022,7 +9345,7 @@ private struct StorageTile: View {
 
     init(row: AppUsageRow, color: Color) {
         title = row.app.name
-        subtitle = compactBytes(row.totalSizeBytes)
+        subtitle = row.scannedTotalSizeBytes.map(compactBytes) ?? "Not scanned"
         self.color = color
     }
 
@@ -9043,6 +10366,33 @@ private func updateStatusColor(_ status: AppUpdateStatus) -> Color {
     }
 }
 
+private func updateStatusIcon(_ status: AppUpdateStatus) -> String {
+    switch status {
+    case .available:
+        return "arrow.down.circle.fill"
+    case .updated, .upToDate:
+        return "checkmark.circle.fill"
+    case .needsAdmin:
+        return "lock.shield.fill"
+    case .needsRestart:
+        return "restart.circle.fill"
+    case .manualAction:
+        return "hand.raised.fill"
+    case .adoptable:
+        return "shippingbox.fill"
+    case .failed:
+        return "exclamationmark.octagon.fill"
+    case .providerUnavailable:
+        return "link.badge.plus"
+    case .skipped:
+        return "forward.end.fill"
+    case .checking:
+        return "magnifyingglass.circle.fill"
+    case .updating:
+        return "arrow.triangle.2.circlepath.circle.fill"
+    }
+}
+
 private func versionTransition(_ entry: AppChangeLogEntry) -> String {
     if let fromVersion = entry.fromVersion, let toVersion = entry.toVersion {
         return "\(fromVersion) -> \(toVersion)"
@@ -9275,7 +10625,7 @@ private func cleanupItemCountText(_ count: Int?) -> String {
 private func cleanupSeverityLabel(_ suggestion: CleanupSuggestion) -> String {
     switch suggestion.severity {
     case .low:
-        return "Safe"
+        return "Low impact"
     case .medium:
         return "Medium"
     case .high:
@@ -9303,8 +10653,30 @@ private func cleanupIsLowRisk(_ suggestion: CleanupSuggestion) -> Bool {
     }
 }
 
+private func cleanupConfidence(_ suggestion: CleanupSuggestion, row: AppUsageRow?) -> CleanupConfidenceLevel {
+    guard let app = row?.app else { return .reviewRequired }
+    return CleanupEvidencePolicy.confidence(for: suggestion.category, path: suggestion.path, app: app)
+}
+
+private func cleanupConfidenceColor(_ suggestion: CleanupSuggestion, row: AppUsageRow?) -> Color {
+    cleanupConfidence(suggestion, row: row) == .high ? DashboardTheme.green : DashboardTheme.orange
+}
+
+private func cleanupObservedRange(_ suggestion: CleanupSuggestion, row: AppUsageRow?) -> String {
+    let start = row?.scannedAt ?? suggestion.createdAt
+    return "\(cleanupEvidenceDate(start)) – \(cleanupEvidenceDate(suggestion.createdAt))"
+}
+
+private func cleanupEvidenceDate(_ date: Date?) -> String {
+    guard let date else { return "Unavailable" }
+    let formatter = DateFormatter()
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .short
+    return formatter.string(from: date)
+}
+
 private func isUnusedForThirtyDays(_ row: AppUsageRow) -> Bool {
-    guard let lastSeen = row.lastSeen else { return true }
+    guard let lastSeen = row.lastSeen else { return row.activityState == .verifiedInactive }
     return lastSeen < Date().addingTimeInterval(-30 * 24 * 60 * 60)
 }
 
@@ -9412,6 +10784,21 @@ private func usageSegmentTooltip(bucket: UsageTrendBucket, segment: UsageStackSe
 private func heatmapTooltip(_ cell: UsageHeatmapCell) -> String {
     let topApp = cell.topAppName.map { ", top app: \($0)" } ?? ""
     return "\(cell.rowLabel) \(cell.hourOfDay):00: \(AppMonitorFormatting.duration(cell.seconds)), \(cell.sessionCount) sessions\(topApp)"
+}
+
+private func heatmapAccessibilityValue(_ cell: UsageHeatmapCell) -> String {
+    let sessions = "\(cell.sessionCount) session\(cell.sessionCount == 1 ? "" : "s")"
+    let topApp = cell.topAppName ?? "no top app"
+    return "\(cell.rowLabel), \(heatmapHourRange(cell.hourOfDay)), \(AppMonitorFormatting.duration(cell.seconds)), \(sessions), top app \(topApp)"
+}
+
+private func heatmapHourRange(_ hour: Int) -> String {
+    let start = DateComponents(calendar: Calendar.current, hour: hour).date ?? .distantPast
+    let end = Calendar.current.date(byAdding: .hour, value: 1, to: start) ?? start
+    let formatter = DateFormatter()
+    formatter.timeStyle = .short
+    formatter.dateStyle = .none
+    return "\(formatter.string(from: start))–\(formatter.string(from: end))"
 }
 
 private extension ReportingPeriod {

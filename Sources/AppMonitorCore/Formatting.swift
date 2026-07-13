@@ -23,6 +23,11 @@ public enum AppMonitorFormatting {
         return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
+    public static func bytes(_ bytes: Int64?) -> String {
+        guard let bytes else { return "Not scanned" }
+        return self.bytes(bytes)
+    }
+
     public static func shortDateTime(_ date: Date?) -> String {
         guard let date else { return "Never" }
         let formatter = DateFormatter()

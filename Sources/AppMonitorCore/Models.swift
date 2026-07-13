@@ -155,6 +155,25 @@ public struct ImportedUsageHistory: Hashable {
     }
 }
 
+public struct MonitoringHistorySummary: Hashable {
+    public let eventCount: Int
+    public let earliestEventAt: Date?
+    public let latestEventAt: Date?
+    public let importedAppCount: Int
+
+    public init(
+        eventCount: Int,
+        earliestEventAt: Date?,
+        latestEventAt: Date?,
+        importedAppCount: Int
+    ) {
+        self.eventCount = eventCount
+        self.earliestEventAt = earliestEventAt
+        self.latestEventAt = latestEventAt
+        self.importedAppCount = importedAppCount
+    }
+}
+
 public struct ImportedUsageTotals: Hashable {
     public var lastUsed: Date?
     public var useCount: Int64?
@@ -468,13 +487,30 @@ public struct AppUsageRow: Identifiable, Hashable {
     public let importedUseCount: Int64?
     public let importedDaysInPeriod: Int
     public let importedAt: Date?
+    public let trackingStartedAt: Date?
+    public let verifiedInactivityDays: Int
+    public let activityEvaluatedAt: Date
 
     public var totalSizeBytes: Int64 {
         bundleSizeBytes + relatedSizeBytes
     }
 
+    /// Nil means storage has not been measured. A measured empty app is zero.
+    public var scannedTotalSizeBytes: Int64? {
+        scannedAt == nil ? nil : totalSizeBytes
+    }
+
     public var lastSeen: Date? {
         lastUsed ?? importedLastUsed
+    }
+
+    public var activityState: AppActivityState {
+        if lastSeen != nil { return .recorded }
+        guard let trackingStartedAt else { return .coverageUnavailable }
+        let observationStart = max(trackingStartedAt, app.installedAt ?? trackingStartedAt)
+        let verifiedAt = Calendar.current.date(byAdding: .day, value: verifiedInactivityDays, to: observationStart)
+            ?? observationStart.addingTimeInterval(TimeInterval(verifiedInactivityDays * 86_400))
+        return activityEvaluatedAt >= verifiedAt ? .verifiedInactive : .noActivityRecorded
     }
 
     public var scanStatus: String {
@@ -493,7 +529,10 @@ public struct AppUsageRow: Identifiable, Hashable {
         importedLastUsed: Date? = nil,
         importedUseCount: Int64? = nil,
         importedDaysInPeriod: Int = 0,
-        importedAt: Date? = nil
+        importedAt: Date? = nil,
+        trackingStartedAt: Date? = nil,
+        verifiedInactivityDays: Int = 30,
+        activityEvaluatedAt: Date = Date()
     ) {
         self.app = app
         self.usageSeconds = usageSeconds
@@ -506,6 +545,58 @@ public struct AppUsageRow: Identifiable, Hashable {
         self.importedUseCount = importedUseCount
         self.importedDaysInPeriod = importedDaysInPeriod
         self.importedAt = importedAt
+        self.trackingStartedAt = trackingStartedAt
+        self.verifiedInactivityDays = verifiedInactivityDays
+        self.activityEvaluatedAt = activityEvaluatedAt
+    }
+}
+
+public enum ScanSnapshotPhase: Equatable, Sendable {
+    case idle
+    case refreshing(completed: Int, total: Int)
+    case completed(Date)
+    case failed(String)
+
+    public var isRefreshing: Bool {
+        if case .refreshing = self { return true }
+        return false
+    }
+
+    public var allowsSnapshotActions: Bool { !isRefreshing }
+}
+
+public struct CompletedAppScanSnapshot {
+    public let storageItemsByAppID: [String: [StorageScanItem]]
+    public let healthFindingsByAppID: [String: [AppHealthFinding]]
+    public let cleanupSuggestionsByAppID: [String: [CleanupSuggestion]]
+    public let largeFiles: [LargeFileRecord]
+
+    public init(
+        storageItemsByAppID: [String: [StorageScanItem]],
+        healthFindingsByAppID: [String: [AppHealthFinding]],
+        cleanupSuggestionsByAppID: [String: [CleanupSuggestion]],
+        largeFiles: [LargeFileRecord]
+    ) {
+        self.storageItemsByAppID = storageItemsByAppID
+        self.healthFindingsByAppID = healthFindingsByAppID
+        self.cleanupSuggestionsByAppID = cleanupSuggestionsByAppID
+        self.largeFiles = largeFiles
+    }
+}
+
+public enum AppActivityState: String, Hashable, Codable {
+    case recorded
+    case noActivityRecorded
+    case coverageUnavailable
+    case verifiedInactive
+
+    public var displayName: String {
+        switch self {
+        case .recorded: return "Activity recorded"
+        case .noActivityRecorded: return "No activity recorded yet"
+        case .coverageUnavailable: return "Activity history unavailable"
+        case .verifiedInactive: return "Never used"
+        }
     }
 }
 
@@ -707,6 +798,78 @@ public struct AppWarningItem: Identifiable, Hashable, Codable {
     }
 }
 
+public enum AppWarningDisposition: String, Codable, CaseIterable, Identifiable {
+    case open
+    case acknowledged
+    case ignored
+    case falsePositive
+    case verified
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .open: return "Open"
+        case .acknowledged: return "Acknowledged"
+        case .ignored: return "Ignored"
+        case .falsePositive: return "False Positive"
+        case .verified: return "Verified"
+        }
+    }
+
+    public var isSuppressed: Bool {
+        self == .ignored || self == .falsePositive
+    }
+}
+
+public struct AppWarningTriageRecord: Identifiable, Hashable, Codable {
+    public var id: String { warningID }
+    public let warningID: String
+    public var disposition: AppWarningDisposition
+    public var snapshot: AppWarningItem
+    public let firstSeenAt: Date
+    public var lastSeenAt: Date
+    public var updatedAt: Date
+
+    public init(
+        warningID: String,
+        disposition: AppWarningDisposition,
+        snapshot: AppWarningItem,
+        firstSeenAt: Date = Date(),
+        lastSeenAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.warningID = warningID
+        self.disposition = disposition
+        self.snapshot = snapshot
+        self.firstSeenAt = firstSeenAt
+        self.lastSeenAt = lastSeenAt
+        self.updatedAt = updatedAt
+    }
+}
+
+public struct AppWarningTriageEvent: Identifiable, Hashable, Codable {
+    public let id: String
+    public let warningID: String
+    public let action: String
+    public let detail: String
+    public let createdAt: Date
+
+    public init(
+        id: String = UUID().uuidString,
+        warningID: String,
+        action: String,
+        detail: String,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.warningID = warningID
+        self.action = action
+        self.detail = detail
+        self.createdAt = createdAt
+    }
+}
+
 public enum CleanupSeverity: String, Codable, CaseIterable, Identifiable {
     case low
     case medium
@@ -717,6 +880,7 @@ public enum CleanupSeverity: String, Codable, CaseIterable, Identifiable {
 
 public enum CleanupSuggestionState: String, Codable, CaseIterable, Identifiable {
     case pending
+    case reviewRequested
     case approved
     case quarantined
     case restored
@@ -774,6 +938,7 @@ public struct CleanupSuggestion: Identifiable, Hashable, Codable {
 
 public enum LargeFileReviewState: String, Codable, CaseIterable, Identifiable {
     case needsReview
+    case queuedForQuarantine
     case ignored
     case quarantined
     case removed
@@ -790,6 +955,7 @@ public struct LargeFileRecord: Identifiable, Hashable, Codable {
     public let sizeBytes: Int64
     public let riskScore: Int
     public let riskReason: String
+    public let modifiedAt: Date?
     public var state: LargeFileReviewState
     public let scannedAt: Date
 
@@ -801,6 +967,7 @@ public struct LargeFileRecord: Identifiable, Hashable, Codable {
         sizeBytes: Int64,
         riskScore: Int,
         riskReason: String,
+        modifiedAt: Date? = nil,
         state: LargeFileReviewState = .needsReview,
         scannedAt: Date = Date()
     ) {
@@ -811,6 +978,7 @@ public struct LargeFileRecord: Identifiable, Hashable, Codable {
         self.sizeBytes = sizeBytes
         self.riskScore = riskScore
         self.riskReason = riskReason
+        self.modifiedAt = modifiedAt
         self.state = state
         self.scannedAt = scannedAt
     }

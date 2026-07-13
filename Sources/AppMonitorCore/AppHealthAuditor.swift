@@ -41,12 +41,12 @@ public struct AppHealthAuditor {
             ))
         }
 
-        if fileManager.isWritableFile(atPath: app.path), app.path.hasPrefix("/Applications/") {
+        if app.path.hasPrefix("/Applications/"), hasUnsafeWritePermissions(atPath: app.path) {
             findings.append(AppHealthFinding(
                 appID: app.id,
                 severity: .warning,
                 title: "Writable Bundle",
-                detail: "The bundle is writable by the current user, which increases tamper risk.",
+                detail: "The bundle is writable by group or other users, which increases tamper risk.",
                 source: "Filesystem",
                 checkedAt: checkedAt
             ))
@@ -88,6 +88,13 @@ public struct AppHealthAuditor {
         }
 
         return findings
+    }
+
+    private func hasUnsafeWritePermissions(atPath path: String) -> Bool {
+        guard let permissions = try? fileManager.attributesOfItem(atPath: path)[.posixPermissions] as? NSNumber else {
+            return false
+        }
+        return permissions.intValue & 0o022 != 0
     }
 
     private func signatureFinding(for app: MonitoredApp, checkedAt: Date) -> AppHealthFinding {

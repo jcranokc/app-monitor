@@ -50,6 +50,30 @@ struct AppMonitorApp: App {
                 }
                 .keyboardShortcut("k", modifiers: [.command])
             }
+
+            CommandMenu("Navigate") {
+                Button("Overview") { model.navigate(.overview) }
+                    .keyboardShortcut("1", modifiers: [.command])
+                Button("App Updates") { model.showUpdates(filter: .apps) }
+                    .keyboardShortcut("2", modifiers: [.command])
+                Button("All Apps") { model.showAppList(.all) }
+                    .keyboardShortcut("3", modifiers: [.command])
+                Button("Warnings") { model.navigate(.warnings) }
+                    .keyboardShortcut("4", modifiers: [.command])
+                Button("Quarantine Review") { model.navigate(.cleanup) }
+                    .keyboardShortcut("5", modifiers: [.command])
+                Button("History") { model.navigate(.history) }
+                    .keyboardShortcut("6", modifiers: [.command])
+                Button("Settings") { model.navigate(.settings) }
+                    .keyboardShortcut(",", modifiers: [.command])
+                Divider()
+                Button(model.isInspectorVisible ? "Hide Details" : "Show Details") {
+                    model.isInspectorVisible.toggle()
+                    AppAccessibility.announce(model.isInspectorVisible ? "Details shown" : "Details hidden")
+                }
+                .disabled(!model.hasInspectorContent)
+                .keyboardShortcut("i", modifiers: [.command, .option])
+            }
         }
     }
 }

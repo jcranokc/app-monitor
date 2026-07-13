@@ -1,0 +1,172 @@
+{
+  "input": "/Users/jacob/.codex/plugins/cache/openai-curated-remote/openai-templates/0.1.0/skills/artifact-template-system-design/assets/reference.docx",
+  "fonts_by_char_count": {
+    "Helvetica Neue": 8535,
+    "Arial": 39,
+    "Helvetica Neue Light": 11
+  },
+  "direct_run_formatting_runs": 200,
+  "direct_paragraph_formatting_paragraphs": 218,
+  "heading_like_paragraphs_not_heading_style": [
+    {
+      "para_index": 98,
+      "text": "Authors",
+      "style": "normal"
+    },
+    {
+      "para_index": 100,
+      "text": "Reviewers",
+      "style": "normal"
+    },
+    {
+      "para_index": 102,
+      "text": "Related docs",
+      "style": "normal"
+    },
+    {
+      "para_index": 104,
+      "text": "Scope",
+      "style": "normal"
+    },
+    {
+      "para_index": 106,
+      "text": "Goals",
+      "style": "normal"
+    },
+    {
+      "para_index": 107,
+      "text": "Non-goals",
+      "style": "normal"
+    },
+    {
+      "para_index": 116,
+      "text": "Component",
+      "style": "normal"
+    },
+    {
+      "para_index": 117,
+      "text": "Responsibility",
+      "style": "normal"
+    },
+    {
+      "para_index": 118,
+      "text": "Primary storage",
+      "style": "normal"
+    },
+    {
+      "para_index": 119,
+      "text": "Failure behavior",
+      "style": "normal"
+    },
+    {
+      "para_index": 140,
+      "text": "Field",
+      "style": "normal"
+    },
+    {
+      "para_index": 141,
+      "text": "Type",
+      "style": "normal"
+    },
+    {
+      "para_index": 142,
+      "text": "Required",
+      "style": "normal"
+    },
+    {
+      "para_index": 143,
+      "text": "Description",
+      "style": "normal"
+    },
+    {
+      "para_index": 172,
+      "text": "Scenario",
+      "style": "normal"
+    },
+    {
+      "para_index": 173,
+      "text": "Expected behavior",
+      "style": "normal"
+    },
+    {
+      "para_index": 174,
+      "text": "Reasoning",
+      "style": "normal"
+    },
+    {
+      "para_index": 187,
+      "text": "Signal",
+      "style": "normal"
+    },
+    {
+      "para_index": 188,
+      "text": "SLO or alert",
+      "style": "normal"
+    },
+    {
+      "para_index": 189,
+      "text": "Owner",
+      "style": "normal"
+    }
+  ],
+  "examples": {
+    "direct_paragraph_formatting": [
+      {
+        "para_index": 1,
+        "text": "",
+        "style": "normal"
+      },
+      {
+        "para_index": 2,
+        "text": "",
+        "style": "normal"
+      },
+      {
+        "para_index": 3,
+        "text": "",
+        "style": "normal"
+      },
+      {
+        "para_index": 4,
+        "text": "",
+        "style": "normal"
+      },
+      {
+        "para_index": 5,
+        "text": "",
+        "style": "normal"
+      }
+    ],
+    "direct_run_formatting": [
+      {
+        "para_index": 9,
+        "run_text": "System Name",
+        "style": "Title"
+      },
+      {
+        "para_index": 10,
+        "run_text": "Title of Proposal",
+        "style": "Title"
+      },
+      {
+        "para_index": 22,
+        "run_text": "1.  Abstract",
+        "style": "Heading 1"
+      },
+      {
+        "para_index": 23,
+        "run_text": "[Summarize the proposed system, the problem it solves, and the intended outcome.",
+        "style": "normal"
+      },
+      {
+        "para_index": 24,
+        "run_text": "[Describe the workloads and constraints this design must support. Clarify what t",
+        "style": "normal"
+      }
+    ]
+  },
+  "notes": [
+    "Direct formatting is not always wrong, but it often causes inconsistent output when templates change.",
+    "Heading-like paragraphs not using Heading styles can break TOC and accessibility."
+  ]
+}

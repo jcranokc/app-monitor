@@ -17,64 +17,71 @@ struct MenuBarPopoverView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 12) {
-                header
+            ScrollView {
+                VStack(spacing: 12) {
+                    header
 
-                LazyVGrid(columns: cardColumns, spacing: 10) {
-                    MetricCard(
-                        title: "USED TODAY",
-                        value: durationValue,
-                        unit: nil,
-                        subtitle: nil,
-                        tint: MenuBarTheme.accent,
-                        accessory: AnyView(MiniUsageBars(values: miniUsageValues))
-                    )
+                    if let operationStatus {
+                        MenuBarOperationStatusView(status: operationStatus)
+                    }
 
-                    MetricCard(
-                        title: "STORAGE USED",
-                        value: storageUsedParts.value,
-                        unit: storageUsedParts.unit,
-                        subtitle: "of \(storageTotalText)",
-                        tint: MenuBarTheme.blue,
-                        accessory: AnyView(
-                            MiniProgressBar(
-                                fraction: diskUsage.usedFraction,
-                                tint: MenuBarTheme.blue
+                    LazyVGrid(columns: cardColumns, spacing: 10) {
+                        MetricCard(
+                            title: "USED TODAY",
+                            value: durationValue,
+                            unit: nil,
+                            subtitle: nil,
+                            tint: MenuBarTheme.accent,
+                            accessory: AnyView(MiniUsageBars(values: miniUsageValues))
+                        )
+
+                        MetricCard(
+                            title: "STORAGE USED",
+                            value: storageUsedParts.value,
+                            unit: storageUsedParts.unit,
+                            subtitle: "of \(storageTotalText)",
+                            tint: MenuBarTheme.blue,
+                            accessory: AnyView(
+                                MiniProgressBar(
+                                    fraction: diskUsage.usedFraction,
+                                    tint: MenuBarTheme.blue
+                                )
                             )
                         )
-                    )
 
-                    MetricCard(
-                        title: "APPS",
-                        value: "\(model.rows.count)",
-                        unit: nil,
-                        subtitle: "Installed",
-                        tint: MenuBarTheme.green,
-                        accessory: AnyView(EmptyView())
-                    )
+                        MetricCard(
+                            title: "APPS",
+                            value: "\(model.rows.count)",
+                            unit: nil,
+                            subtitle: "Installed",
+                            tint: MenuBarTheme.green,
+                            accessory: AnyView(EmptyView())
+                        )
 
-                    MetricCard(
-                        title: "CLEANUP",
-                        value: cleanupParts.value,
-                        unit: cleanupParts.unit,
-                        subtitle: "Available",
-                        tint: MenuBarTheme.orange,
-                        accessory: AnyView(EmptyView())
-                    )
+                        MetricCard(
+                            title: "CLEANUP",
+                            value: cleanupParts.value,
+                            unit: cleanupParts.unit,
+                            subtitle: "Available",
+                            tint: MenuBarTheme.orange,
+                            accessory: AnyView(EmptyView())
+                        )
+                    }
+
+                    topAppsSection
+                    storageSection
                 }
-
-                topAppsSection
-                storageSection
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 12)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
-            .padding(.bottom, 12)
+            .scrollIndicators(.automatic)
 
             actionRows
 
             footer
         }
-        .frame(width: 540)
+        .frame(width: 540, height: 618)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -115,7 +122,22 @@ struct MenuBarPopoverView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(MenuBarIconButtonStyle())
+            .accessibilityLabel("Open App Monitor settings")
             .help("Open Settings")
+
+            Button {
+                Task { await model.checkForUpdates() }
+            } label: {
+                Image(systemName: model.isCheckingUpdates ? "hourglass" : "arrow.down.circle")
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 38, height: 38)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(MenuBarIconButtonStyle())
+            .disabled(model.isCheckingUpdates)
+            .keyboardShortcut("u", modifiers: [.command, .shift])
+            .accessibilityLabel(model.isCheckingUpdates ? "Checking for installed app updates" : "Check for installed app updates")
+            .help(model.isCheckingUpdates ? "Update check is running" : "Check for installed app updates")
 
             Button {
                 Task { await model.runFullScan() }
@@ -127,8 +149,11 @@ struct MenuBarPopoverView: View {
             }
             .buttonStyle(MenuBarIconButtonStyle())
             .disabled(model.isScanningStorage)
+            .keyboardShortcut("r", modifiers: [.command, .shift])
+            .accessibilityLabel(model.isScanningStorage ? "Storage scan is running" : "Refresh storage scan")
             .help(model.isScanningStorage ? "Storage scan is running" : "Refresh scan")
         }
+        .focusSection()
     }
 
     private var topAppsSection: some View {
@@ -237,9 +262,14 @@ struct MenuBarPopoverView: View {
 
     private var footer: some View {
         HStack {
-            Text("Last scan: \(lastScanText)")
-                .font(.system(size: 13))
-                .foregroundStyle(MenuBarTheme.secondaryText)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Scan: \(lastScanText)")
+                Text("Updates: \(lastUpdateCheckText)")
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(MenuBarTheme.secondaryText)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Data freshness. Last scan \(lastScanText). Last update check \(lastUpdateCheckText).")
 
             Spacer()
 
@@ -256,6 +286,7 @@ struct MenuBarPopoverView: View {
                     )
             }
             .buttonStyle(.plain)
+            .keyboardShortcut(.defaultAction)
             .help("Open the App Monitor dashboard")
         }
         .padding(.horizontal, 20)
@@ -268,17 +299,14 @@ struct MenuBarPopoverView: View {
     }
 
     private var topRows: [AppUsageRow] {
-        let todayRows = model.todayUsageRows
-        let source = todayRows.isEmpty ? model.rows : todayRows
-        let rowsWithSignals = source.filter { topAppScore(for: $0) > 0 }
-        let ranked = (rowsWithSignals.isEmpty ? source : rowsWithSignals).sorted { lhs, rhs in
-            let lhsScore = topAppScore(for: lhs)
-            let rhsScore = topAppScore(for: rhs)
-            if lhsScore == rhsScore {
-                return lhs.app.name.localizedCaseInsensitiveCompare(rhs.app.name) == .orderedAscending
+        let ranked = model.todayUsageRows
+            .filter { $0.usageSeconds > 0 }
+            .sorted { lhs, rhs in
+                if lhs.usageSeconds == rhs.usageSeconds {
+                    return lhs.app.name.localizedCaseInsensitiveCompare(rhs.app.name) == .orderedAscending
+                }
+                return lhs.usageSeconds > rhs.usageSeconds
             }
-            return lhsScore > rhsScore
-        }
         return Array(ranked.prefix(5))
     }
 
@@ -295,10 +323,7 @@ struct MenuBarPopoverView: View {
     }
 
     private func topAppScore(for row: AppUsageRow) -> Double {
-        let usage = max(0, row.usageSeconds)
-        let importedSignal = Double(row.importedDaysInPeriod) * 180
-        let sizeSignal = Double(max(0, row.totalSizeBytes)) / 1_000_000_000
-        return max(usage, importedSignal, sizeSignal)
+        max(0, row.usageSeconds)
     }
 
     private func topAppFraction(for row: AppUsageRow) -> Double {
@@ -307,16 +332,7 @@ struct MenuBarPopoverView: View {
     }
 
     private func topAppValueText(for row: AppUsageRow) -> String {
-        if row.usageSeconds >= 60 {
-            return compactDuration(row.usageSeconds)
-        }
-        if row.importedDaysInPeriod > 0 {
-            return "\(row.importedDaysInPeriod)d"
-        }
-        if row.totalSizeBytes > 0 {
-            return compactBytes(row.totalSizeBytes)
-        }
-        return "<1m"
+        row.usageSeconds >= 60 ? compactDuration(row.usageSeconds) : "<1m"
     }
 
     private var diskUsage: DiskUsage {
@@ -375,6 +391,44 @@ struct MenuBarPopoverView: View {
         return Self.dateFormatter.string(from: date)
     }
 
+    private var lastUpdateCheckText: String {
+        guard let date = model.updateSettings.lastCheckAt else { return "Never" }
+        return relativeFreshnessText(for: date)
+    }
+
+    private var operationStatus: MenuBarOperationStatus? {
+        if model.isScanningStorage {
+            let message = model.storageScanProgress.detail.isEmpty
+                ? "Scanning storage…"
+                : model.storageScanProgress.detail
+            return MenuBarOperationStatus(kind: .loading, message: message)
+        }
+        if model.isCheckingUpdates {
+            return MenuBarOperationStatus(kind: .loading, message: "Checking installed apps for updates…")
+        }
+        if model.isLoadingInventory {
+            return MenuBarOperationStatus(kind: .loading, message: "Refreshing the app inventory…")
+        }
+        if isFailureMessage(model.lastMessage) {
+            return MenuBarOperationStatus(kind: .error, message: model.lastMessage)
+        }
+        return nil
+    }
+
+    private func isFailureMessage(_ message: String) -> Bool {
+        let normalized = message.lowercased()
+        return normalized.contains(" failed:")
+            || normalized.hasPrefix("unable to ")
+            || normalized.hasPrefix("could not ")
+    }
+
+    private func relativeFreshnessText(for date: Date) -> String {
+        if Calendar.current.isDateInToday(date) {
+            return "Today, \(Self.timeFormatter.string(from: date))"
+        }
+        return Self.dateFormatter.string(from: date)
+    }
+
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
@@ -388,6 +442,49 @@ struct MenuBarPopoverView: View {
         formatter.timeStyle = .short
         return formatter
     }()
+}
+
+private struct MenuBarOperationStatus {
+    enum Kind: Equatable {
+        case loading
+        case error
+    }
+
+    let kind: Kind
+    let message: String
+}
+
+private struct MenuBarOperationStatusView: View {
+    let status: MenuBarOperationStatus
+
+    var body: some View {
+        HStack(spacing: 9) {
+            if status.kind == .loading {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(MenuBarTheme.warning)
+            }
+
+            Text(status.message)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(MenuBarTheme.primaryText)
+                .lineLimit(2)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(MenuBarTheme.sectionFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(status.kind == .error ? MenuBarTheme.warning.opacity(0.7) : MenuBarTheme.hairline, lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(status.kind == .loading ? "In progress. \(status.message)" : "Error. \(status.message)")
+    }
 }
 
 private enum MenuBarTheme {
@@ -492,6 +589,8 @@ private struct MetricCard: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(MenuBarTheme.hairline, lineWidth: 1)
         )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel([title, value, unit, subtitle].compactMap { $0 }.joined(separator: ", "))
     }
 }
 
@@ -608,6 +707,10 @@ private struct SegmentedStorageBar: View {
         }
         .frame(height: 16)
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            segments.map { "\($0.title), \(compactBytes($0.bytes))" }.joined(separator: "; ")
+        )
     }
 
     private func width(for segment: StorageBreakdownSegment, totalWidth: CGFloat) -> CGFloat {
@@ -638,6 +741,8 @@ private struct StorageLegendItem: View {
                     .minimumScaleFactor(0.72)
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(segment.title), \(compactBytes(segment.bytes))")
     }
 }
 

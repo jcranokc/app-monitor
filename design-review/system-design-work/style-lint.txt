@@ -1,0 +1,14 @@
+[style_lint] direct run-formatting runs: 256
+[style_lint] direct paragraph-formatting paragraphs: 277
+[style_lint] top fonts by char count: Helvetica Neue(19432), Arial(44), Helvetica Neue Light(11)
+[style_lint] heading-like paragraphs not using Heading styles (first 10):
+  - #118: style='normal' text='Direction 1 — Operations Console'
+  - #122: style='normal' text='Direction 2 — Calm Mac Health'
+  - #126: style='normal' text='Direction 3 — Update Command Center'
+  - #130: style='normal' text='Direction 4 — Activity Timeline Workspace'
+  - #134: style='normal' text='Direction 5 — Compact Pro Utility'
+  - #148: style='normal' text='Authors'
+  - #150: style='normal' text='Reviewers'
+  - #152: style='normal' text='Related docs'
+  - #154: style='normal' text='Scope'
+  - #156: style='normal' text='Goals'

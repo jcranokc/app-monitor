@@ -43,6 +43,7 @@ struct InspectorPane: View {
 
             DetailLine(title: "Version", value: row.app.version ?? "Unknown")
             DetailLine(title: "Usage", value: AppMonitorFormatting.duration(row.usageSeconds))
+            DetailLine(title: "Activity Status", value: row.activityState.displayName)
             DetailLine(title: "Last Used", value: AppMonitorFormatting.shortDateTime(row.lastUsed))
             DetailLine(title: "Imported Last Used", value: AppMonitorFormatting.shortDateTime(row.importedLastUsed))
             DetailLine(title: "Path", value: row.app.path)
@@ -113,7 +114,7 @@ struct InspectorPane: View {
                                     .font(.caption.weight(.semibold))
                                 Spacer()
                                 Text(AppMonitorFormatting.shortDateTime(entry.capturedAt))
-                                    .font(.caption2)
+                                    .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                             Text(entry.title)
@@ -138,9 +139,9 @@ struct InspectorPane: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Storage")
                 .font(.headline)
-            DetailLine(title: "App Bundle", value: AppMonitorFormatting.bytes(row.bundleSizeBytes))
-            DetailLine(title: "Related Files", value: AppMonitorFormatting.bytes(row.relatedSizeBytes))
-            DetailLine(title: "Total", value: AppMonitorFormatting.bytes(row.totalSizeBytes))
+            DetailLine(title: "App Bundle", value: AppMonitorFormatting.bytes(row.scannedAt == nil ? nil : row.bundleSizeBytes))
+            DetailLine(title: "Related Files", value: AppMonitorFormatting.bytes(row.scannedAt == nil ? nil : row.relatedSizeBytes))
+            DetailLine(title: "Total", value: AppMonitorFormatting.bytes(row.scannedTotalSizeBytes))
             DetailLine(title: "Status", value: row.scanStatus)
             if row.warningCount > 0 {
                 Label("\(row.warningCount) scan warning\(row.warningCount == 1 ? "" : "s")", systemImage: "exclamationmark.triangle")

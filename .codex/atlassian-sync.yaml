@@ -1,0 +1,12 @@
+version: 1
+jira:
+  issue_key: KAN-28
+  create_if_missing: false
+  allow_transitions: false
+  allow_field_edits: false
+confluence:
+  page_id: "589950"
+  space_key: TWC
+  space_id: "622620"
+  section: Codex activity
+  create_if_missing: false

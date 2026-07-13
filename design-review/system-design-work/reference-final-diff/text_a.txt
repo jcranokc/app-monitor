@@ -1,0 +1,196 @@
+System Name
+Title of Proposal
+STATUS
+[Draft / Proposed / Approved]
+OWNER
+[Team Name]
+LAST UPDATED
+[Month, DD, YYYY]
+Authors
+[Name(s)]
+Reviewers
+[Reviewer names, roles, or groups]
+Related docs
+[Link to related docs]
+Scope
+[One-sentence description of what this design covers]
+1.  Abstract
+[Summarize the proposed system, the problem it solves, and the intended outcome. Describe the core design at a high level, including the main boundaries, dependencies, and guarantees. Keep this section concise enough that a reviewer can understand the proposal without reading the full document.]
+[Describe the workloads and constraints this design must support. Clarify what the proposal does not attempt to solve, the assumptions it relies on, and the most important operational or implementation boundaries.]
+2.  Goals and Non-Goals
+Goals
+Non-goals
+[Goal 1: measurable outcome this design must achieve]
+[Non-goal 1: explicitly excluded capability or outcome]
+[Goal 2: reliability, scale, security, or user outcome]
+[Non-goal 2: adjacent problem deferred to a later phase]
+[Goal 3: required platform, policy, or operational capability]
+[Non-goal 3: unsupported workflow, audience, or interface]
+[Goal 4: rollout, reversibility, or blast-radius constraint]
+[Non-goal 4: guarantee the design cannot or will not provide]
+3.  Background and Problem Statement
+[Describe the current state, the specific problem, and why the existing approach is no longer sufficient. Include relevant scale, reliability, security, cost, or developer-experience constraints, and explain the impact of leaving the problem unresolved.]
+[Explain the proposed system boundary and the major responsibilities on each side. Name the primary components, how they interact, and which inputs determine behavior. State the key design principle or invariant that should guide implementation and review.]
+4.  Proposed Architecture
+Figure 1. [Proposed System Architecture].
+Core components
+Component
+Responsibility
+Primary storage
+Failure behavior
+[Component A]
+[Describe its responsibility, inputs, and outputs.]
+[Primary datastore or dependency]
+[Describe behavior when this component fails.]
+[Component B]
+[Describe the core decision or processing responsibility.]
+[Configuration, policy, or metadata store]
+[Describe fail-open, fail-closed, or fallback behavior.]
+[Component C]
+[Describe downstream execution and response handling.]
+[Queue, cache, adapter, or service dependency]
+[Describe timeout, retry, and terminal failure behavior.]
+[Component D]
+[Describe durable state, audit, or lifecycle responsibilities.]
+[Primary operational datastore]
+[Describe write failure and recovery behavior.]
+[Component E]
+[Describe metrics, logs, traces, and alerting responsibilities.]
+[Telemetry and analytics backend]
+[Describe degraded-mode monitoring and escalation.]
+5.  Request Lifecycle
+[Describe how a request, event, or job enters the system and identify the required inputs.]
+[Describe validation, authentication, authorization, and normalization at the system boundary.]
+[Describe which configuration, policy, state, or dependency data is loaded before processing.]
+[Describe the primary decision or processing step and the output it produces.]
+[Describe which durable state must be written before side effects or downstream execution begin.]
+[Describe downstream calls, retries, timeouts, budget limits, and terminal conditions.]
+[Describe final state updates, the response or output, and the metrics, logs, and traces emitted.]
+6.  API and Data Contracts
+Primary data contract
+Field
+Type
+Required
+Description
+field_name_1
+[Type]
+[Yes / No]
+[Describe meaning, validation, ownership, and lifecycle.]
+field_name_2
+[Type]
+[Yes / No]
+[Describe the source and permitted values.]
+field_name_3
+[Type]
+[Yes / No]
+[Describe versioning or compatibility requirements.]
+field_name_4
+[Type]
+[Yes / No]
+[Describe relationship to other identifiers or records.]
+field_name_5
+[Type]
+[Yes / No]
+[Describe privacy, retention, or audit constraints.]
+field_name_6
+[Type]
+[Yes / No]
+[Describe array, object, or nested structure semantics.]
+field_name_7
+[Type]
+[Yes / No]
+[Describe how this field affects system behavior.]
+Contract guarantees
+[State the ordering, durability, or validation guarantee that must hold before execution.]
+[State how writes, attempts, or events are identified and ordered.]
+[State which versions, identifiers, or inputs must be captured for audit and replay.]
+[State what this data is and is not a source of truth for.]
+The versioned schema or interface definition is published at 
+[Link to interface or schema] and update it with each contract release.
+7. Consistency, Idempotency, and Replay
+[Explain the consistency, idempotency, replay, ordering, or concurrency guarantees required by this design. Distinguish client-facing guarantees from internal analysis or recovery behavior, and identify where duplicate work or partial failure is acceptable.]
+Scenario
+Expected behavior
+Reasoning
+[Duplicate, replayed, or repeated input]
+[Describe the stable response and state transition.]
+[Explain how duplicate work or side effects are prevented.]
+[Required write or dependency fails]
+[Describe the error, retryability, and side-effect behavior.]
+[Explain why the failure mode is safe and observable.]
+[Timeout, partial failure, or downstream error]
+[Describe retry, fallback, and budget behavior.]
+[Explain how auditability and consistency are maintained.]
+[Configuration changes during execution]
+[Describe which version remains authoritative.]
+[Explain how mid-request behavior changes are prevented.]
+8. Security and Privacy Considerations
+[Describe authentication, authorization, and tenant or data-boundary requirements.]
+[Describe data minimization, sensitive payload handling, and logging restrictions.]
+[Describe credential, secret, key, and certificate storage and access requirements.]
+[Describe safe defaults for administrative, replay, migration, and debugging tools.]
+[Describe retention, deletion, residency, privacy, and audit requirements.]
+9.  Operational Readiness
+Signal
+SLO or alert
+Owner
+Launch gate
+[Success or completion rate]
+[Target, measurement window, and page threshold]
+[Owning team]
+[Required / Recommended]
+[Latency or processing time]
+[Percentile target, alert threshold, and duration]
+[Owning team]
+[Required / Recommended]
+[Fallback, retry, or error rate]
+[Warning and paging thresholds by workload class]
+[Owning team]
+[Required / Recommended]
+[Configuration or deployment drift]
+[Condition that indicates unsafe divergence]
+[Owning team]
+[Required / Recommended]
+[Recovery, replay, or integrity check]
+[Synthetic or sampled validation cadence and target]
+[Owning team]
+[Required / Recommended]
+Rollout constraint: [Describe dry-run, canary, feature-flag, validation, rollback, and promotion requirements before production launch.]
+10. Alternatives Considered
+Alternative
+Why it was considered
+Why it was not selected
+[Alternative 1]
+[Describe the main benefit or reason to consider it.]
+[Describe the decisive tradeoff or unmet requirement.]
+[Alternative 2]
+[Describe the relevant capability or simplicity.]
+[Describe added complexity, risk, cost, or scope.]
+[Alternative 3]
+[Describe the potential performance or product benefit.]
+[Describe explainability, maturity, or operational concerns.]
+[Alternative 4]
+[Describe the consistency or implementation appeal.]
+[Describe the technical boundary that makes it unsuitable.]
+11. Open Questions
+[Open question 1: identify a decision that requires reviewer input before implementation.]
+[Open question 2: identify an unresolved product, policy, or operational constraint.]
+[Open question 3: identify a scale, deployment, or regional design choice.]
+[Open question 4: identify an ownership, access-control, or tooling decision.]
+12. Decision and Next Steps
+[State the recommended decision and summarize the implementation sequence. Name the first milestone, the validation or dry-run stage, the initial production audience, and the conditions that must be met before broader rollout.]
+Milestone
+Deliverable
+Exit criteria
+M1
+[Foundational implementation or dry-run capability]
+[Measurable evidence that the foundation works safely]
+M2
+[Validation, tooling, migration, or audit capability]
+[Acceptance test or reconstruction criteria]
+M3
+[Limited production rollout]
+[Stability period and severity threshold]
+M4
+[Broader customer or workload rollout]
+[SLOs met, rollback tested, and approvals complete]

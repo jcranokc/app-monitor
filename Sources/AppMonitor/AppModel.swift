@@ -89,6 +89,24 @@ private enum AppMonitorSelfUpdateError: LocalizedError {
 
 @MainActor
 final class AppModel: ObservableObject {
+    enum MonitoringRetention: Int, CaseIterable, Identifiable {
+        case thirtyDays = 30
+        case ninetyDays = 90
+        case oneYear = 365
+        case forever = 0
+
+        var id: Int { rawValue }
+
+        var title: String {
+            switch self {
+            case .thirtyDays: return "30 days"
+            case .ninetyDays: return "90 days"
+            case .oneYear: return "1 year"
+            case .forever: return "Until I delete it"
+            }
+        }
+    }
+
     enum DashboardDestination: String, CaseIterable, Identifiable {
         case overview = "Overview"
         case storage = "Storage Overview"
@@ -122,7 +140,7 @@ final class AppModel: ObservableObject {
             case .recentlyUsed:
                 return "Apps used during the selected reporting period"
             case .neverUsed:
-                return "Apps with no recorded local or imported activity"
+                return "Apps verified inactive after the observation window"
             case .systemApps:
                 return "Non-user-facing apps and system bundles"
             }
@@ -204,6 +222,8 @@ final class AppModel: ObservableObject {
         let path: String
         let sizeBytes: Int64?
         let isDirectory: Bool
+        let owner: String
+        let modifiedAt: Date?
     }
 
     @Published var period: ReportingPeriod = .week {
@@ -241,6 +261,7 @@ final class AppModel: ObservableObject {
     @Published var selectedStorageItems: [StorageScanItem] = []
     @Published var isLoadingInventory = false
     @Published var isScanningStorage = false
+    @Published private(set) var scanSnapshotPhase: ScanSnapshotPhase = .idle
     @Published var isImportingHistory = false
     @Published var storageScanProgress = OperationProgressSnapshot.idle
     @Published var historyImportProgress = ""
@@ -254,6 +275,7 @@ final class AppModel: ObservableObject {
     @Published var updateRecords: [AppUpdateRecord] = []
     @Published var updateListFilter: UpdateListFilter?
     @Published var selectedUpdateIDs: Set<String> = []
+    @Published var pendingHomebrewAdoptionRecords: [AppUpdateRecord] = []
     @Published var focusedUpdateID: String? {
         didSet {
             if focusedUpdateID != nil {
@@ -293,6 +315,15 @@ final class AppModel: ObservableObject {
         didSet { AppAppearanceSettings.preference = appearancePreference }
     }
     @Published var trackingStartedAt: Date?
+    @Published private(set) var monitoringHistorySummary = MonitoringHistorySummary(
+        eventCount: 0,
+        earliestEventAt: nil,
+        latestEventAt: nil,
+        importedAppCount: 0
+    )
+    @Published var monitoringRetention: MonitoringRetention = .ninetyDays
+    @Published var spotlightHistoryImportEnabled = true
+    @Published private(set) var homebrewAuthorizationStatus = "Checking Keychain..."
     @Published var destination: DashboardDestination = .overview
     @Published var appListQuickFilter: AppListQuickFilter = .all {
         didSet { refreshNavigationSnapshots(reloadUsageAnalytics: false, reloadTimeline: true) }
@@ -315,6 +346,8 @@ final class AppModel: ObservableObject {
     @Published var largeFiles: [LargeFileRecord] = []
     @Published private(set) var allStorageItems: [StorageScanItem] = []
     @Published private(set) var warningItems: [AppWarningItem] = []
+    @Published private(set) var warningTriageRecords: [String: AppWarningTriageRecord] = [:]
+    @Published private(set) var warningTriageHistory: [AppWarningTriageEvent] = []
     @Published var selectedWarningID: String?
     @Published var tagsByAppID: [String: [String]] = [:]
     @Published var ignoredAppIDs: Set<String> = []
@@ -525,7 +558,7 @@ final class AppModel: ObservableObject {
     }
 
     var activeCleanupSuggestions: [CleanupSuggestion] {
-        cleanupSuggestions.filter { $0.state == .pending || $0.state == .approved }
+        cleanupSuggestions.filter { $0.state == .pending || $0.state == .reviewRequested || $0.state == .approved }
     }
 
     var displayedCleanupSuggestions: [CleanupSuggestion] {
@@ -567,7 +600,7 @@ final class AppModel: ObservableObject {
     }
 
     var warningCount: Int {
-        warningItems.count
+        activeWarningItems.count
     }
 
     var availableUpdateCount: Int {
@@ -685,18 +718,119 @@ final class AppModel: ObservableObject {
         largeFiles.filter { $0.state == .needsReview }.count
     }
 
+    var localDataLocation: String {
+        "~/Library/Application Support/App Monitor/\(dataStore.databaseURL.lastPathComponent)"
+    }
+
     func bootstrap() async {
         guard !hasBootstrapped else { return }
         hasBootstrapped = true
         loadTrackingStart()
+        loadMonitoringRetention()
+        loadSpotlightHistoryImportPreference()
+        applyMonitoringRetention()
         loadInfrastructureState()
         tracker.start()
         startScheduler()
         startUpdateScheduler()
         startAppMonitorUpdateScheduler()
         await refreshInventory()
-        await refreshImportedActivity()
+        if spotlightHistoryImportEnabled {
+            await refreshImportedActivity()
+        }
         await refreshStoredChangeLogNotes()
+        await refreshPrivacyState()
+    }
+
+    func refreshPrivacyState() async {
+        do {
+            monitoringHistorySummary = try dataStore.monitoringHistorySummary()
+        } catch {
+            lastMessage = "Could not read monitoring history: \(error.localizedDescription)"
+        }
+
+        guard let helperURL = HomebrewAskpassHelper.executableURL() else {
+            homebrewAuthorizationStatus = "Unavailable — secure helper not installed"
+            return
+        }
+        let result = await Task.detached(priority: .utility) {
+            ProcessUpdateCommandRunner().run(helperURL.path, arguments: ["--status"])
+        }.value
+        if result.exitCode == 0 {
+            homebrewAuthorizationStatus = result.output.trimmingCharacters(in: .whitespacesAndNewlines) == "stored"
+                ? "Saved in this Mac's Keychain"
+                : "Not saved"
+        } else {
+            homebrewAuthorizationStatus = "Could not read Keychain status"
+        }
+    }
+
+    func updateMonitoringRetention(_ retention: MonitoringRetention) {
+        monitoringRetention = retention
+        do {
+            try dataStore.setSetting("monitoring_retention_days", value: String(retention.rawValue))
+            applyMonitoringRetention()
+            monitoringHistorySummary = try dataStore.monitoringHistorySummary()
+            lastMessage = "Monitoring history retention set to \(retention.title)"
+        } catch {
+            lastMessage = "Could not update retention: \(error.localizedDescription)"
+        }
+    }
+
+    func updateSpotlightHistoryImport(enabled: Bool) {
+        spotlightHistoryImportEnabled = enabled
+        do {
+            try dataStore.setSetting("spotlight_history_import_enabled", value: enabled ? "1" : "0")
+            if enabled {
+                Task { await refreshImportedActivity() }
+            } else {
+                try dataStore.deleteImportedUsageHistory()
+                monitoringHistorySummary = try dataStore.monitoringHistorySummary()
+                reloadRows()
+                lastMessage = "Removed imported Spotlight usage summaries"
+            }
+        } catch {
+            lastMessage = "Could not update Spotlight history preference: \(error.localizedDescription)"
+        }
+    }
+
+    func exportMonitoringHistory() {
+        do {
+            let segments = try dataStore.fetchAllUsageSegments()
+            save(
+                csv: CSVExporter.monitoringHistoryCSV(segments: segments),
+                suggestedName: "app-monitor-activity-history.csv"
+            )
+        } catch {
+            lastMessage = "Monitoring history export failed: \(error.localizedDescription)"
+        }
+    }
+
+    func deleteMonitoringHistory() {
+        tracker.flush()
+        do {
+            let deletedCount = try dataStore.deleteMonitoringHistory()
+            try dataStore.setSetting("spotlight_history_import_enabled", value: "0")
+            spotlightHistoryImportEnabled = false
+            let start = Date()
+            try dataStore.setSetting("tracking_started_at", value: String(start.timeIntervalSince1970))
+            trackingStartedAt = start
+            monitoringHistorySummary = try dataStore.monitoringHistorySummary()
+            reloadRows()
+            lastMessage = "Deleted \(deletedCount) locally measured activity events"
+        } catch {
+            lastMessage = "Could not delete monitoring history: \(error.localizedDescription)"
+        }
+    }
+
+    func reviewIgnoredApps() {
+        includeIgnoredApps = true
+        appListQuickFilter = .all
+        destination = .usageTable
+    }
+
+    func openLocalDataFolder() {
+        NSWorkspace.shared.activateFileViewerSelecting([dataStore.databaseURL])
     }
 
     func refreshInventory() async {
@@ -744,13 +878,12 @@ final class AppModel: ObservableObject {
 
     func runFullScan() async {
         await refreshStorage()
-        await refreshHealthAudit()
-        markScanCompleted()
     }
 
     func refreshStorage() async {
         guard !isScanningStorage else { return }
         isScanningStorage = true
+        scanSnapshotPhase = .refreshing(completed: 0, total: 0)
         storageScanProgress = OperationProgressSnapshot(
             title: "Scanning storage",
             detail: "Preparing scan...",
@@ -768,6 +901,12 @@ final class AppModel: ObservableObject {
             let store = dataStore
             let count = apps.count
             var allLargeFiles: [LargeFileRecord] = []
+            var storageItemsByAppID: [String: [StorageScanItem]] = [:]
+            var healthFindingsByAppID: [String: [AppHealthFinding]] = [:]
+            var cleanupSuggestionsByAppID: [String: [CleanupSuggestion]] = [:]
+            let auditor = healthAuditor
+            let analyzer = cleanupAnalyzer
+            let currentRows = Dictionary(uniqueKeysWithValues: try store.fetchRows(period: period, includeAll: includeAllBundles).map { ($0.app.id, $0) })
 
             for (index, app) in apps.enumerated() {
                 storageScanProgress = OperationProgressSnapshot(
@@ -779,6 +918,7 @@ final class AppModel: ObservableObject {
                     scannedFileCount: 0,
                     scannedBytes: 0
                 )
+                scanSnapshotPhase = .refreshing(completed: index, total: count)
                 let progressHandler: StorageScanProgressHandler = { [weak self] progress in
                     Task { @MainActor [weak self] in
                         self?.updateStorageScanProgress(
@@ -792,9 +932,14 @@ final class AppModel: ObservableObject {
                 let scanResult = await Task.detached(priority: .utility) {
                     let items = scanner.scanStorage(for: app, progress: progressHandler)
                     let largeFiles = scanner.largeFiles(in: items, progress: progressHandler)
-                    return (items: items, largeFiles: largeFiles)
+                    let findings = auditor.audit(app: app)
+                    return (items: items, largeFiles: largeFiles, findings: findings)
                 }.value
-                try store.replaceStorageItems(for: app.id, items: scanResult.items)
+                storageItemsByAppID[app.id] = scanResult.items
+                healthFindingsByAppID[app.id] = scanResult.findings
+                if let row = currentRows[app.id] {
+                    cleanupSuggestionsByAppID[app.id] = analyzer.suggestions(for: row, items: scanResult.items)
+                }
                 allLargeFiles.append(contentsOf: scanResult.largeFiles)
                 storageScanProgress = OperationProgressSnapshot(
                     title: "Scanning storage",
@@ -805,18 +950,23 @@ final class AppModel: ObservableObject {
                     scannedFileCount: 0,
                     scannedBytes: scanResult.items.reduce(0) { $0 + $1.sizeBytes }
                 )
-                if index % 5 == 0 {
-                    reloadRows()
-                }
+                scanSnapshotPhase = .refreshing(completed: index + 1, total: count)
             }
 
+            try store.publishCompletedScanSnapshot(CompletedAppScanSnapshot(
+                storageItemsByAppID: storageItemsByAppID,
+                healthFindingsByAppID: healthFindingsByAppID,
+                cleanupSuggestionsByAppID: cleanupSuggestionsByAppID,
+                largeFiles: allLargeFiles
+            ))
             reloadRows()
-            try regenerateCleanupSuggestions(for: apps)
-            try dataStore.replaceLargeFiles(allLargeFiles)
             loadInfrastructureState()
             loadSelectedStorageItems()
+            markScanCompleted()
+            scanSnapshotPhase = .completed(Date())
             lastMessage = "Storage scan complete for \(count) apps"
         } catch {
+            scanSnapshotPhase = .failed(error.localizedDescription)
             lastMessage = "Storage scan failed: \(error.localizedDescription)"
         }
 
@@ -1005,14 +1155,17 @@ final class AppModel: ObservableObject {
         } else {
             selectedUpdateIDs.remove(record.id)
         }
+        lastMessage = "\(record.appName) update \(selected ? "selected" : "deselected")"
     }
 
     func selectAllAvailableUpdates() {
         selectedUpdateIDs = Set(filteredUpdateRecords.filter { $0.canInstall && $0.status.countsAsAvailable }.map(\.id))
+        lastMessage = "Selected \(selectedUpdateIDs.count) available update\(selectedUpdateIDs.count == 1 ? "" : "s")"
     }
 
     func clearSelectedUpdates() {
         selectedUpdateIDs = []
+        lastMessage = "Update selection cleared"
     }
 
     func updateSelectedRecords() async {
@@ -1020,7 +1173,22 @@ final class AppModel: ObservableObject {
     }
 
     func updateRecord(_ record: AppUpdateRecord) async {
+        if record.status == .adoptable {
+            pendingHomebrewAdoptionRecords = [recordWithCurrentAutoEligibility(record)]
+            return
+        }
         await performUpdates([recordWithCurrentAutoEligibility(record)], mode: .manual)
+    }
+
+    func confirmPendingHomebrewAdoption() async {
+        let records = pendingHomebrewAdoptionRecords
+        pendingHomebrewAdoptionRecords = []
+        await performUpdates(records, mode: .manual)
+    }
+
+    func cancelPendingHomebrewAdoption() {
+        pendingHomebrewAdoptionRecords = []
+        lastMessage = "Homebrew adoption cancelled"
     }
 
     func adoptableUpdateRecord(for row: AppUsageRow) -> AppUpdateRecord? {
@@ -1042,6 +1210,11 @@ final class AppModel: ObservableObject {
                 if lhs.status != .adoptable, rhs.status == .adoptable { return false }
                 return updateRecordComparator(lhs, rhs)
             }
+        let adoptions = records.filter { $0.status == .adoptable }
+        if !adoptions.isEmpty {
+            pendingHomebrewAdoptionRecords = records
+            return
+        }
         await performUpdates(records, mode: .manual)
     }
 
@@ -1059,6 +1232,7 @@ final class AppModel: ObservableObject {
         }.value
         if result.exitCode == 0 {
             lastMessage = "Removed the saved Homebrew administrator password from your Mac Keychain"
+            homebrewAuthorizationStatus = "Not saved"
         } else {
             lastMessage = "Could not remove the saved Homebrew password: \(result.output)"
         }
@@ -1466,7 +1640,7 @@ final class AppModel: ObservableObject {
     }
 
     func selectedWarning(for row: AppUsageRow?) -> AppWarningItem? {
-        let warnings = warningItems
+        let warnings = auditableWarningItems
         if let selectedWarningID,
            let selected = warnings.first(where: { $0.id == selectedWarningID }) {
             return selected
@@ -1476,6 +1650,116 @@ final class AppModel: ObservableObject {
             return rowWarning
         }
         return warnings.first
+    }
+
+    var activeWarningItems: [AppWarningItem] {
+        warningItems.filter { warningDisposition(for: $0) == .open }
+    }
+
+    var auditableWarningItems: [AppWarningItem] {
+        var items = Dictionary(uniqueKeysWithValues: warningItems.map { ($0.id, $0) })
+        for record in warningTriageRecords.values where items[record.warningID] == nil {
+            items[record.warningID] = record.snapshot
+        }
+        return items.values.sorted { lhs, rhs in
+            if lhs.severity != rhs.severity { return lhs.severity > rhs.severity }
+            if lhs.detectedAt != rhs.detectedAt { return lhs.detectedAt > rhs.detectedAt }
+            return lhs.appName.localizedCaseInsensitiveCompare(rhs.appName) == .orderedAscending
+        }
+    }
+
+    func warningDisposition(for warning: AppWarningItem) -> AppWarningDisposition {
+        warningTriageRecords[warning.id]?.disposition ?? .open
+    }
+
+    func warningIsCurrentlyPresent(_ warning: AppWarningItem) -> Bool {
+        warningItems.contains(where: { $0.id == warning.id })
+    }
+
+    func warningHistory(for warning: AppWarningItem) -> [AppWarningTriageEvent] {
+        warningTriageHistory.filter { $0.warningID == warning.id }
+    }
+
+    func setWarningDisposition(_ disposition: AppWarningDisposition, for warning: AppWarningItem) {
+        do {
+            try dataStore.upsertWarningTriageRecord(
+                warning: warning,
+                disposition: disposition,
+                action: disposition == .open ? "Reopened" : disposition.displayName,
+                detail: "\(warning.appName): \(warning.title)"
+            )
+            loadWarningTriageState()
+            refreshNavigationSnapshots(reloadUsageAnalytics: false, reloadTimeline: false)
+            lastMessage = "\(disposition.displayName): \(warning.title)"
+        } catch {
+            lastMessage = "Unable to update warning: \(error.localizedDescription)"
+        }
+    }
+
+    func setWarningDisposition(_ disposition: AppWarningDisposition, for warnings: [AppWarningItem]) {
+        guard !warnings.isEmpty else { return }
+        do {
+            for warning in warnings {
+                try dataStore.upsertWarningTriageRecord(
+                    warning: warning,
+                    disposition: disposition,
+                    action: "Bulk \(disposition.displayName)",
+                    detail: "Scoped bulk action: \(warning.appName): \(warning.title)"
+                )
+            }
+            loadWarningTriageState()
+            refreshNavigationSnapshots(reloadUsageAnalytics: false, reloadTimeline: false)
+            lastMessage = "\(disposition.displayName) \(warnings.count) warning\(warnings.count == 1 ? "" : "s")"
+        } catch {
+            lastMessage = "Unable to update warnings: \(error.localizedDescription)"
+        }
+    }
+
+    func recheckWarning(_ warning: AppWarningItem) async {
+        selectWarning(warning)
+        await rescanSelectedApp()
+        do {
+            let isPresent = warningItems.contains(where: { $0.id == warning.id })
+            try dataStore.upsertWarningTriageRecord(
+                warning: warning,
+                disposition: warningDisposition(for: warning),
+                action: "Rechecked",
+                detail: isPresent ? "Finding is still present." : "Finding was not detected."
+            )
+            loadWarningTriageState()
+            lastMessage = isPresent ? "Recheck complete: finding is still present" : "Recheck complete: finding was not detected"
+        } catch {
+            lastMessage = "Recheck history failed: \(error.localizedDescription)"
+        }
+    }
+
+    func verifyWarningFix(_ warning: AppWarningItem) async {
+        selectWarning(warning)
+        await rescanSelectedApp()
+        let isPresent = warningItems.contains(where: { $0.id == warning.id })
+        do {
+            if isPresent {
+                try dataStore.upsertWarningTriageRecord(
+                    warning: warning,
+                    disposition: warningDisposition(for: warning),
+                    action: "Verification Failed",
+                    detail: "The same finding was detected again."
+                )
+                lastMessage = "Verification failed: finding is still present"
+            } else {
+                try dataStore.upsertWarningTriageRecord(
+                    warning: warning,
+                    disposition: .verified,
+                    action: "Fix Verified",
+                    detail: "A fresh scan no longer detected this finding."
+                )
+                lastMessage = "Fix verified: \(warning.title)"
+            }
+            loadWarningTriageState()
+            refreshNavigationSnapshots(reloadUsageAnalytics: false, reloadTimeline: false)
+        } catch {
+            lastMessage = "Verification history failed: \(error.localizedDescription)"
+        }
     }
 
     func selectApp(id appID: String) {
@@ -1730,6 +2014,10 @@ final class AppModel: ObservableObject {
     }
 
     func setCleanupSuggestionQueued(_ suggestion: CleanupSuggestion, queued: Bool) {
+        if queued, cleanupSuggestionIsProtected(suggestion) {
+            lastMessage = "Protected data cannot be added to the cleanup queue"
+            return
+        }
         updateCleanupSuggestion(suggestion, state: queued ? .approved : .pending)
     }
 
@@ -1738,7 +2026,17 @@ final class AppModel: ObservableObject {
     }
 
     func approveCleanupSuggestions(_ suggestions: [CleanupSuggestion]) {
-        updateCleanupSuggestions(suggestions, state: .approved, actionTitle: "Cleanup Queued")
+        let highConfidence = suggestions.filter { suggestion in
+            guard let app = appRow(for: suggestion.appID)?.app else { return false }
+            return !cleanupSuggestionIsProtected(suggestion)
+                && CleanupEvidencePolicy.confidence(for: suggestion.category, path: suggestion.path, app: app) == .high
+        }
+        let highConfidenceIDs = Set(highConfidence.map(\.id))
+        let requiringReview = suggestions.filter {
+            !highConfidenceIDs.contains($0.id) && !cleanupSuggestionIsProtected($0)
+        }
+        updateCleanupSuggestions(highConfidence, state: .approved, actionTitle: "Cleanup Queued")
+        updateCleanupSuggestions(requiringReview, state: .reviewRequested, actionTitle: "Cleanup Review Required")
     }
 
     func clearApprovedCleanupSuggestions() {
@@ -1752,6 +2050,15 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func quarantineCleanupSuggestion(_ suggestion: CleanupSuggestion) -> Bool {
+        guard scanSnapshotPhase.allowsSnapshotActions else {
+            lastMessage = "Quarantine actions are unavailable while a new scan snapshot is refreshing"
+            return false
+        }
+        guard !cleanupSuggestionIsProtected(suggestion) else {
+            updateCleanupSuggestion(suggestion, state: .failed)
+            lastMessage = "Cleanup blocked because the path is protected"
+            return false
+        }
         do {
             let destination = try quarantinePath(for: suggestion)
             try FileManager.default.createDirectory(
@@ -1773,6 +2080,15 @@ final class AppModel: ObservableObject {
             lastMessage = "Quarantine failed: \(error.localizedDescription)"
             return false
         }
+    }
+
+    private func cleanupSuggestionIsProtected(_ suggestion: CleanupSuggestion) -> Bool {
+        guard let app = appRow(for: suggestion.appID)?.app else { return true }
+        return CleanupEvidencePolicy.isProtectedFromCleanupSuggestion(
+            category: suggestion.category,
+            path: suggestion.path,
+            app: app
+        )
     }
 
     func restoreCleanupSuggestion(_ suggestion: CleanupSuggestion) {
@@ -1799,6 +2115,7 @@ final class AppModel: ObservableObject {
 
     func selectHistoryAction(id: String) {
         selectedHistoryActionID = id
+        lastMessage = "History item selected"
     }
 
     func historyActionButtonTitle(title: String, detail: String) -> String {
@@ -1839,6 +2156,10 @@ final class AppModel: ObservableObject {
     }
 
     func runApprovedCleanup() async {
+        guard scanSnapshotPhase.allowsSnapshotActions else {
+            lastMessage = "Cleanup is unavailable while a new scan snapshot is refreshing"
+            return
+        }
         guard !isRunningCleanup else { return }
         let approved = cleanupSuggestions.filter { $0.state == .approved }
         guard !approved.isEmpty else {
@@ -1937,6 +2258,31 @@ final class AppModel: ObservableObject {
         )
         quarantineStorageItem(item)
         updateLargeFile(record, state: .quarantined)
+    }
+
+    func addLargeFileToQuarantineReview(_ record: LargeFileRecord) {
+        let suggestion = CleanupSuggestion(
+            id: "\(record.id)|quarantine-review",
+            appID: record.appID,
+            title: "Large file review",
+            path: record.path,
+            category: record.category,
+            sizeBytes: record.sizeBytes,
+            severity: record.riskScore >= 60 ? .high : (record.riskScore >= 35 ? .medium : .low),
+            rationale: "Large file surfaced during storage scanning and was added for an explicit quarantine decision.",
+            riskNotes: record.riskReason,
+            state: .reviewRequested
+        )
+
+        do {
+            try dataStore.saveCleanupSuggestion(suggestion)
+            try dataStore.updateLargeFileState(id: record.id, state: .queuedForQuarantine)
+            try dataStore.recordAction(title: "Large File Added to Quarantine Review", detail: record.path)
+            loadInfrastructureState()
+            lastMessage = "Added \(URL(fileURLWithPath: record.path).lastPathComponent) to Quarantine Review"
+        } catch {
+            lastMessage = "Unable to add large file to quarantine review: \(error.localizedDescription)"
+        }
     }
 
     func ignoreLargeFile(_ record: LargeFileRecord) {
@@ -2168,64 +2514,82 @@ final class AppModel: ObservableObject {
         loadSelectedStorageItems()
     }
 
-    func cleanupPreviewItems(for suggestion: CleanupSuggestion, limit: Int = 4) -> [CleanupPreviewItem] {
+    func cleanupPreviewItems(for suggestion: CleanupSuggestion, limit: Int? = nil) -> [CleanupPreviewItem] {
         let url = URL(fileURLWithPath: suggestion.path)
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: suggestion.path, isDirectory: &isDirectory) else {
             return [
-                CleanupPreviewItem(
-                    id: suggestion.path,
-                    name: url.lastPathComponent.isEmpty ? suggestion.path : url.lastPathComponent,
-                    path: suggestion.path,
-                    sizeBytes: nil,
-                    isDirectory: false
-                )
+                cleanupPreviewItem(url: url, sizeBytes: nil, isDirectory: false)
             ]
         }
 
         guard isDirectory.boolValue,
               let children = try? FileManager.default.contentsOfDirectory(
                 at: url,
-                includingPropertiesForKeys: [.isDirectoryKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey],
+                includingPropertiesForKeys: [.isDirectoryKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey, .contentModificationDateKey],
                 options: [.skipsHiddenFiles]
               )
         else {
             return [
-                CleanupPreviewItem(
-                    id: suggestion.path,
-                    name: url.lastPathComponent.isEmpty ? suggestion.path : url.lastPathComponent,
-                    path: suggestion.path,
-                    sizeBytes: suggestion.sizeBytes,
-                    isDirectory: false
-                )
+                cleanupPreviewItem(url: url, sizeBytes: suggestion.sizeBytes, isDirectory: false)
             ]
         }
 
-        let previewItems = children.prefix(limit).map { child in
-            let values = try? child.resourceValues(forKeys: [.isDirectoryKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey])
+        let orderedChildren = children.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        let visibleChildren = limit.map { Array(orderedChildren.prefix($0)) } ?? orderedChildren
+        let previewItems = visibleChildren.map { child in
+            let values = try? child.resourceValues(forKeys: [.isDirectoryKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey, .contentModificationDateKey])
             let size = values?.totalFileAllocatedSize ?? values?.fileAllocatedSize
-            return CleanupPreviewItem(
-                id: child.path,
-                name: child.lastPathComponent,
-                path: child.path,
+            return cleanupPreviewItem(
+                url: child,
                 sizeBytes: size.map(Int64.init),
-                isDirectory: values?.isDirectory == true
+                isDirectory: values?.isDirectory == true,
+                modifiedAt: values?.contentModificationDate
             )
         }
 
         if previewItems.isEmpty {
             return [
-                CleanupPreviewItem(
-                    id: suggestion.path,
-                    name: url.lastPathComponent.isEmpty ? suggestion.path : url.lastPathComponent,
-                    path: suggestion.path,
-                    sizeBytes: suggestion.sizeBytes,
-                    isDirectory: true
-                )
+                cleanupPreviewItem(url: url, sizeBytes: suggestion.sizeBytes, isDirectory: true)
             ]
         }
 
         return Array(previewItems)
+    }
+
+    func cleanupProtectedItems(for suggestion: CleanupSuggestion) -> [StorageScanItem] {
+        selectedStorageItems
+            .filter { $0.appID == suggestion.appID && CleanupEvidencePolicy.isProtectedFromCleanupSuggestion($0.category) }
+            .sorted { lhs, rhs in
+                if lhs.category == rhs.category { return lhs.path < rhs.path }
+                return lhs.category.rawValue < rhs.category.rawValue
+            }
+    }
+
+    func cleanupRootEvidence(for suggestion: CleanupSuggestion) -> CleanupPreviewItem {
+        cleanupPreviewItem(
+            url: URL(fileURLWithPath: suggestion.path),
+            sizeBytes: suggestion.sizeBytes,
+            isDirectory: true
+        )
+    }
+
+    private func cleanupPreviewItem(
+        url: URL,
+        sizeBytes: Int64?,
+        isDirectory: Bool,
+        modifiedAt: Date? = nil
+    ) -> CleanupPreviewItem {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return CleanupPreviewItem(
+            id: url.path,
+            name: url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent,
+            path: url.path,
+            sizeBytes: sizeBytes,
+            isDirectory: isDirectory,
+            owner: attributes?[.ownerAccountName] as? String ?? "Owner unavailable",
+            modifiedAt: modifiedAt ?? attributes?[.modificationDate] as? Date
+        )
     }
 
     func cleanupPreviewItemCount(for suggestion: CleanupSuggestion) -> Int? {
@@ -2242,6 +2606,10 @@ final class AppModel: ObservableObject {
     }
 
     func rescanSelectedApp() async {
+        guard scanSnapshotPhase.allowsSnapshotActions else {
+            lastMessage = "Wait for the current scan to finish before rescanning an app"
+            return
+        }
         guard let row = selectedRow else { return }
         do {
             let scanner = storageScanner
@@ -2451,10 +2819,22 @@ final class AppModel: ObservableObject {
                 self.focusedUpdateID = nil
             }
             actionHistory = try dataStore.fetchActionHistory()
+            loadWarningTriageState()
             loadSelectedStorageItems()
             refreshNavigationSnapshots(reloadUsageAnalytics: true, reloadTimeline: true)
         } catch {
             lastMessage = "Unable to load infrastructure state: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadWarningTriageState() {
+        do {
+            warningTriageRecords = Dictionary(
+                uniqueKeysWithValues: try dataStore.fetchWarningTriageRecords().map { ($0.warningID, $0) }
+            )
+            warningTriageHistory = try dataStore.fetchWarningTriageHistory()
+        } catch {
+            lastMessage = "Unable to load warning history: \(error.localizedDescription)"
         }
     }
 
@@ -2512,7 +2892,7 @@ final class AppModel: ObservableObject {
             unique[item.id] = item
         }
 
-        return unique.values.sorted { lhs, rhs in
+        return AppWarningPolicy().actionableWarnings(from: Array(unique.values)).sorted { lhs, rhs in
             if lhs.severity != rhs.severity {
                 return lhs.severity > rhs.severity
             }
@@ -2527,15 +2907,21 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func warningIdentity(parts: [String]) -> String {
+        parts
+            .map { $0.replacingOccurrences(of: "|", with: "%7C") }
+            .joined(separator: "|")
+    }
+
     private var warningStates: Set<CleanupSuggestionState> {
-        [.pending, .approved, .quarantined, .failed]
+        [.pending, .reviewRequested, .approved, .quarantined, .failed]
     }
 
     private func healthWarningItem(for finding: AppHealthFinding, row: AppUsageRow) -> AppWarningItem {
         let category = healthCategory(for: finding)
         let severity = healthSeverity(for: finding)
         return AppWarningItem(
-            id: "health:\(finding.id)",
+            id: warningIdentity(parts: ["health", finding.appID, finding.source, finding.title]),
             appID: row.app.id,
             appName: row.app.name,
             appPath: row.app.path,
@@ -2565,7 +2951,7 @@ final class AppModel: ObservableObject {
 
     private func storageWarningItem(for item: StorageScanItem, warning: String, row: AppUsageRow) -> AppWarningItem {
         AppWarningItem(
-            id: "storage:\(item.id)",
+            id: warningIdentity(parts: ["storage", item.appID, item.category.rawValue, item.path]),
             appID: row.app.id,
             appName: row.app.name,
             appPath: row.app.path,
@@ -2671,10 +3057,10 @@ final class AppModel: ObservableObject {
             daysUnused = 9_999
         }
 
-        guard daysUnused >= 90 || (lastSeen == nil && row.app.installedAt != nil) else { return nil }
-        let title = lastSeen == nil ? "Never Opened" : "Old Login Item"
+        guard daysUnused >= 90 || row.activityState == .verifiedInactive else { return nil }
+        let title = lastSeen == nil ? "Verified Inactive" : "Old Login Item"
         let detail = lastSeen == nil
-            ? "\(row.app.name) has no recorded local or imported activity."
+            ? "\(row.app.name) has no recorded local or imported activity after a verified \(row.verifiedInactivityDays)-day observation window."
             : "\(row.app.name) was last used \(daysUnused) days ago."
         return AppWarningItem(
             id: "usage:\(row.app.id)",
@@ -2694,7 +3080,7 @@ final class AppModel: ObservableObject {
             details: [
                 AppWarningDetail(title: "Last Opened", value: AppMonitorFormatting.shortDateTime(lastSeen)),
                 AppWarningDetail(title: "Usage \(period.rawValue)", value: AppMonitorFormatting.duration(row.usageSeconds)),
-                AppWarningDetail(title: "Storage", value: AppMonitorFormatting.bytes(row.totalSizeBytes))
+                AppWarningDetail(title: "Storage", value: AppMonitorFormatting.bytes(row.scannedTotalSizeBytes))
             ],
             affectedItems: [
                 AppWarningAffectedItem(
@@ -2843,10 +3229,15 @@ final class AppModel: ObservableObject {
     }
 
     private func updateCleanupSuggestion(_ suggestion: CleanupSuggestion, state: CleanupSuggestionState) {
+        guard scanSnapshotPhase.allowsSnapshotActions else {
+            lastMessage = "Cleanup review is unavailable while a new scan snapshot is refreshing"
+            return
+        }
         do {
             try dataStore.updateCleanupSuggestion(id: suggestion.id, state: state, quarantinePath: suggestion.quarantinePath)
             try dataStore.recordAction(title: "Cleanup \(state.rawValue.capitalized)", detail: suggestion.path)
             loadInfrastructureState()
+            lastMessage = "\(suggestion.path): cleanup \(state.rawValue)"
         } catch {
             lastMessage = "Cleanup update failed: \(error.localizedDescription)"
         }
@@ -4322,10 +4713,10 @@ final class AppModel: ObservableObject {
             guard let lastSeen = row.lastSeen else { return false }
             return lastSeen >= Date().addingTimeInterval(-7 * 24 * 60 * 60)
         case .unused30Days:
-            guard let lastSeen = row.lastSeen else { return true }
+            guard let lastSeen = row.lastSeen else { return row.activityState == .verifiedInactive }
             return lastSeen < Date().addingTimeInterval(-30 * 24 * 60 * 60)
         case .unused90Days:
-            guard let lastSeen = row.lastSeen else { return true }
+            guard let lastSeen = row.lastSeen else { return row.activityState == .verifiedInactive }
             return lastSeen < Date().addingTimeInterval(-90 * 24 * 60 * 60)
         }
     }
@@ -4354,7 +4745,7 @@ final class AppModel: ObservableObject {
         case .recentlyUsed:
             return row.usageSeconds > 0 || row.importedDaysInPeriod > 0
         case .neverUsed:
-            return row.lastSeen == nil
+            return row.activityState == .verifiedInactive
         case .systemApps:
             return !row.app.isUserFacing
         }
@@ -4383,6 +4774,35 @@ final class AppModel: ObservableObject {
             trackingStartedAt = start
         } catch {
             trackingStartedAt = nil
+        }
+    }
+
+    private func loadMonitoringRetention() {
+        do {
+            let storedDays = try dataStore.setting("monitoring_retention_days").flatMap(Int.init) ?? MonitoringRetention.ninetyDays.rawValue
+            monitoringRetention = MonitoringRetention(rawValue: storedDays) ?? .ninetyDays
+        } catch {
+            monitoringRetention = .ninetyDays
+        }
+    }
+
+    private func loadSpotlightHistoryImportPreference() {
+        do {
+            spotlightHistoryImportEnabled = try dataStore.setting("spotlight_history_import_enabled") != "0"
+        } catch {
+            spotlightHistoryImportEnabled = true
+        }
+    }
+
+    private func applyMonitoringRetention() {
+        guard monitoringRetention != .forever,
+              let cutoff = Calendar.current.date(byAdding: .day, value: -monitoringRetention.rawValue, to: Date()) else {
+            return
+        }
+        do {
+            try dataStore.deleteMonitoringHistory(before: cutoff)
+        } catch {
+            lastMessage = "Could not apply monitoring retention: \(error.localizedDescription)"
         }
     }
 

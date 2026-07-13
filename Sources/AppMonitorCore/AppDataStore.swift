@@ -166,10 +166,12 @@ public final class AppDataStore {
                 size_bytes INTEGER NOT NULL,
                 risk_score INTEGER NOT NULL,
                 risk_reason TEXT NOT NULL,
+                modified_at REAL,
                 state TEXT NOT NULL,
                 scanned_at REAL NOT NULL
             )
             """)
+            try? database.execute("ALTER TABLE large_files ADD COLUMN modified_at REAL")
 
             try database.execute("""
             CREATE INDEX IF NOT EXISTS idx_large_files_app
@@ -198,6 +200,32 @@ public final class AppDataStore {
                 detail TEXT NOT NULL,
                 created_at REAL NOT NULL
             )
+            """)
+
+            try database.execute("""
+            CREATE TABLE IF NOT EXISTS warning_triage (
+                warning_id TEXT PRIMARY KEY,
+                disposition TEXT NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                first_seen_at REAL NOT NULL,
+                last_seen_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            )
+            """)
+
+            try database.execute("""
+            CREATE TABLE IF NOT EXISTS warning_triage_history (
+                id TEXT PRIMARY KEY,
+                warning_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                detail TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """)
+
+            try database.execute("""
+            CREATE INDEX IF NOT EXISTS idx_warning_triage_history_warning
+            ON warning_triage_history(warning_id, created_at)
             """)
 
             try database.execute("""
@@ -388,7 +416,8 @@ public final class AppDataStore {
                 ? "SELECT * FROM apps ORDER BY lower(name), path"
                 : "SELECT * FROM apps WHERE is_user_facing = 1 ORDER BY lower(name), path"
 
-            return try database.query(sql).compactMap(Self.app(from:))
+            let apps = try database.query(sql).compactMap(Self.app(from:))
+            return AppInventoryScanner.reconcileInventory(apps)
         }
     }
 
@@ -415,6 +444,74 @@ public final class AppDataStore {
         }
     }
 
+    public func fetchAllUsageSegments() throws -> [UsageSegment] {
+        try queue.sync {
+            try database.query("SELECT * FROM usage_segments ORDER BY started_at")
+                .compactMap(Self.segment(from:))
+        }
+    }
+
+    public func monitoringHistorySummary() throws -> MonitoringHistorySummary {
+        try queue.sync {
+            let usage = try database.query(
+                "SELECT COUNT(*) AS event_count, MIN(started_at) AS earliest, MAX(ended_at) AS latest FROM usage_segments"
+            ).first
+            let imported = try database.query(
+                "SELECT COUNT(*) AS imported_count FROM imported_usage_history"
+            ).first
+            return MonitoringHistorySummary(
+                eventCount: Int(usage?["event_count"]?.int64 ?? 0),
+                earliestEventAt: usage?["earliest"]?.double.map { Date(timeIntervalSince1970: $0) },
+                latestEventAt: usage?["latest"]?.double.map { Date(timeIntervalSince1970: $0) },
+                importedAppCount: Int(imported?["imported_count"]?.int64 ?? 0)
+            )
+        }
+    }
+
+    public func deleteImportedUsageHistory() throws {
+        try queue.sync {
+            try database.execute("BEGIN IMMEDIATE")
+            do {
+                try database.execute("DELETE FROM imported_usage_days")
+                try database.execute("DELETE FROM imported_usage_history")
+                try database.execute("COMMIT")
+            } catch {
+                try? database.execute("ROLLBACK")
+                throw error
+            }
+        }
+    }
+
+    @discardableResult
+    public func deleteMonitoringHistory(before cutoff: Date? = nil) throws -> Int {
+        try queue.sync {
+            let beforeCount = Int(try database.query("SELECT COUNT(*) AS count FROM usage_segments").first?["count"]?.int64 ?? 0)
+            try database.execute("BEGIN IMMEDIATE")
+            do {
+                if let cutoff {
+                    try database.execute(
+                        "DELETE FROM usage_segments WHERE ended_at < ?",
+                        [.double(cutoff.timeIntervalSince1970)]
+                    )
+                    try database.execute(
+                        "DELETE FROM imported_usage_days WHERE day_start < ?",
+                        [.double(cutoff.timeIntervalSince1970)]
+                    )
+                } else {
+                    try database.execute("DELETE FROM usage_segments")
+                    try database.execute("DELETE FROM imported_usage_days")
+                    try database.execute("DELETE FROM imported_usage_history")
+                }
+                try database.execute("COMMIT")
+            } catch {
+                try? database.execute("ROLLBACK")
+                throw error
+            }
+            let afterCount = Int(try database.query("SELECT COUNT(*) AS count FROM usage_segments").first?["count"]?.int64 ?? 0)
+            return beforeCount - afterCount
+        }
+    }
+
     public func replaceStorageItems(for appID: String, items: [StorageScanItem]) throws {
         try queue.sync {
             try database.execute("BEGIN IMMEDIATE")
@@ -437,6 +534,73 @@ public final class AppDataStore {
                             .double(item.scannedAt.timeIntervalSince1970)
                         ]
                     )
+                }
+                try database.execute("COMMIT")
+            } catch {
+                try? database.execute("ROLLBACK")
+                throw error
+            }
+        }
+    }
+
+    public func publishCompletedScanSnapshot(_ snapshot: CompletedAppScanSnapshot) throws {
+        try queue.sync {
+            let existingCleanup = try database.query("SELECT * FROM cleanup_suggestions")
+                .compactMap(Self.cleanupSuggestion(from:))
+                .reduce(into: [String: CleanupSuggestion]()) { $0[$1.id] = $1 }
+            let existingLargeFiles = try database.query("SELECT * FROM large_files")
+                .compactMap(Self.largeFile(from:))
+                .reduce(into: [String: LargeFileRecord]()) { $0[$1.id] = $1 }
+
+            try database.execute("BEGIN IMMEDIATE")
+            do {
+                for (appID, items) in snapshot.storageItemsByAppID {
+                    try database.execute("DELETE FROM storage_items WHERE app_id = ?", [.text(appID)])
+                    for item in items {
+                        try database.execute(
+                            """
+                            INSERT INTO storage_items
+                            (id, app_id, category, path, size_bytes, warning, scanned_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            [
+                                .text(item.id), .text(item.appID), .text(item.category.rawValue),
+                                .text(item.path), .int64(item.sizeBytes),
+                                item.warning.map(SQLiteValue.text) ?? .null,
+                                .double(item.scannedAt.timeIntervalSince1970)
+                            ]
+                        )
+                    }
+                }
+
+                for (appID, findings) in snapshot.healthFindingsByAppID {
+                    try database.execute("DELETE FROM health_findings WHERE app_id = ?", [.text(appID)])
+                    for finding in findings { try insertHealthFinding(finding) }
+                }
+
+                for (appID, suggestions) in snapshot.cleanupSuggestionsByAppID {
+                    try database.execute(
+                        "DELETE FROM cleanup_suggestions WHERE app_id = ? AND state = ?",
+                        [.text(appID), .text(CleanupSuggestionState.pending.rawValue)]
+                    )
+                    for suggestion in suggestions {
+                        var next = suggestion
+                        if let current = existingCleanup[suggestion.id], current.state != .pending {
+                            next.state = current.state
+                            next.quarantinePath = current.quarantinePath
+                            next.updatedAt = current.updatedAt
+                        }
+                        try upsertCleanupSuggestion(next)
+                    }
+                }
+
+                try database.execute("DELETE FROM large_files WHERE state = ?", [.text(LargeFileReviewState.needsReview.rawValue)])
+                for record in snapshot.largeFiles {
+                    var next = record
+                    if let current = existingLargeFiles[record.id], current.state != .needsReview {
+                        next.state = current.state
+                    }
+                    try upsertLargeFile(next)
                 }
                 try database.execute("COMMIT")
             } catch {
@@ -521,6 +685,12 @@ public final class AppDataStore {
         try queue.sync {
             try database.query("SELECT * FROM cleanup_suggestions ORDER BY updated_at DESC, size_bytes DESC")
                 .compactMap(Self.cleanupSuggestion(from:))
+        }
+    }
+
+    public func saveCleanupSuggestion(_ suggestion: CleanupSuggestion) throws {
+        try queue.sync {
+            try upsertCleanupSuggestion(suggestion)
         }
     }
 
@@ -669,6 +839,128 @@ public final class AppDataStore {
                     return nil
                 }
                 return (Date(timeIntervalSince1970: createdAt), title, detail)
+            }
+        }
+    }
+
+    public func upsertWarningTriageRecord(
+        warning: AppWarningItem,
+        disposition: AppWarningDisposition,
+        action: String,
+        detail: String,
+        date: Date = Date()
+    ) throws {
+        try queue.sync {
+            let existing = try database.query(
+                "SELECT first_seen_at FROM warning_triage WHERE warning_id = ?",
+                [.text(warning.id)]
+            ).first
+            let firstSeenAt = existing?["first_seen_at"]?.double.map(Date.init(timeIntervalSince1970:)) ?? warning.detectedAt
+            let snapshotData = try JSONEncoder().encode(warning)
+            guard let snapshotJSON = String(data: snapshotData, encoding: .utf8) else {
+                throw CocoaError(.fileWriteInapplicableStringEncoding)
+            }
+
+            try database.execute("BEGIN IMMEDIATE")
+            do {
+                try database.execute(
+                    """
+                    INSERT INTO warning_triage
+                    (warning_id, disposition, snapshot_json, first_seen_at, last_seen_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(warning_id) DO UPDATE SET
+                        disposition = excluded.disposition,
+                        snapshot_json = excluded.snapshot_json,
+                        last_seen_at = excluded.last_seen_at,
+                        updated_at = excluded.updated_at
+                    """,
+                    [
+                        .text(warning.id),
+                        .text(disposition.rawValue),
+                        .text(snapshotJSON),
+                        .double(firstSeenAt.timeIntervalSince1970),
+                        .double(max(warning.detectedAt, date).timeIntervalSince1970),
+                        .double(date.timeIntervalSince1970)
+                    ]
+                )
+                try database.execute(
+                    """
+                    INSERT INTO warning_triage_history (id, warning_id, action, detail, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    [.text(UUID().uuidString), .text(warning.id), .text(action), .text(detail), .double(date.timeIntervalSince1970)]
+                )
+                try database.execute("COMMIT")
+            } catch {
+                try? database.execute("ROLLBACK")
+                throw error
+            }
+        }
+    }
+
+    public func recordWarningTriageEvent(
+        warning: AppWarningItem,
+        action: String,
+        detail: String,
+        date: Date = Date()
+    ) throws {
+        try queue.sync {
+            try database.execute(
+                """
+                INSERT INTO warning_triage_history (id, warning_id, action, detail, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [.text(UUID().uuidString), .text(warning.id), .text(action), .text(detail), .double(date.timeIntervalSince1970)]
+            )
+        }
+    }
+
+    public func fetchWarningTriageRecords() throws -> [AppWarningTriageRecord] {
+        try queue.sync {
+            try database.query("SELECT * FROM warning_triage ORDER BY updated_at DESC").compactMap { row in
+                guard
+                    let warningID = row["warning_id"]?.string,
+                    let dispositionValue = row["disposition"]?.string,
+                    let disposition = AppWarningDisposition(rawValue: dispositionValue),
+                    let snapshotJSON = row["snapshot_json"]?.string,
+                    let snapshotData = snapshotJSON.data(using: .utf8),
+                    let snapshot = try? JSONDecoder().decode(AppWarningItem.self, from: snapshotData),
+                    let firstSeenAt = row["first_seen_at"]?.double,
+                    let lastSeenAt = row["last_seen_at"]?.double,
+                    let updatedAt = row["updated_at"]?.double
+                else { return nil }
+                return AppWarningTriageRecord(
+                    warningID: warningID,
+                    disposition: disposition,
+                    snapshot: snapshot,
+                    firstSeenAt: Date(timeIntervalSince1970: firstSeenAt),
+                    lastSeenAt: Date(timeIntervalSince1970: lastSeenAt),
+                    updatedAt: Date(timeIntervalSince1970: updatedAt)
+                )
+            }
+        }
+    }
+
+    public func fetchWarningTriageHistory(limit: Int = 1_000) throws -> [AppWarningTriageEvent] {
+        try queue.sync {
+            try database.query(
+                "SELECT * FROM warning_triage_history ORDER BY created_at DESC LIMIT ?",
+                [.int64(Int64(limit))]
+            ).compactMap { row in
+                guard
+                    let id = row["id"]?.string,
+                    let warningID = row["warning_id"]?.string,
+                    let action = row["action"]?.string,
+                    let detail = row["detail"]?.string,
+                    let createdAt = row["created_at"]?.double
+                else { return nil }
+                return AppWarningTriageEvent(
+                    id: id,
+                    warningID: warningID,
+                    action: action,
+                    detail: detail,
+                    createdAt: Date(timeIntervalSince1970: createdAt)
+                )
             }
         }
     }
@@ -881,6 +1173,10 @@ public final class AppDataStore {
         let usage = try usageTotals(start: interval.start, end: interval.end, calendar: calendar)
         let storage = try storageTotals()
         let imported = try importedUsageTotals(start: interval.start, end: interval.end, calendar: calendar)
+        let trackingStartedAt = try setting("tracking_started_at")
+            .flatMap(TimeInterval.init)
+            .map(Date.init(timeIntervalSince1970:))
+        let verifiedInactivityDays = max(1, try setting("verified_inactivity_days").flatMap(Int.init) ?? 30)
 
         return apps.map { app in
             let appUsage = usage[app.id] ?? UsageAccumulator()
@@ -897,7 +1193,10 @@ public final class AppDataStore {
                 importedLastUsed: appImported.lastUsed,
                 importedUseCount: appImported.useCount,
                 importedDaysInPeriod: appImported.daysInPeriod,
-                importedAt: appImported.importedAt
+                importedAt: appImported.importedAt,
+                trackingStartedAt: trackingStartedAt,
+                verifiedInactivityDays: verifiedInactivityDays,
+                activityEvaluatedAt: now
             )
         }
     }
@@ -2194,14 +2493,15 @@ public final class AppDataStore {
         try database.execute(
             """
             INSERT INTO large_files
-            (id, app_id, path, category, size_bytes, risk_score, risk_reason, state, scanned_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, app_id, path, category, size_bytes, risk_score, risk_reason, modified_at, state, scanned_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 path = excluded.path,
                 category = excluded.category,
                 size_bytes = excluded.size_bytes,
                 risk_score = excluded.risk_score,
                 risk_reason = excluded.risk_reason,
+                modified_at = excluded.modified_at,
                 state = excluded.state,
                 scanned_at = excluded.scanned_at
             """,
@@ -2213,6 +2513,7 @@ public final class AppDataStore {
                 .int64(record.sizeBytes),
                 .int64(Int64(record.riskScore)),
                 .text(record.riskReason),
+                record.modifiedAt.map { .double($0.timeIntervalSince1970) } ?? .null,
                 .text(record.state.rawValue),
                 .double(record.scannedAt.timeIntervalSince1970)
             ]
@@ -2590,6 +2891,7 @@ public final class AppDataStore {
             sizeBytes: sizeBytes,
             riskScore: Int(riskScore),
             riskReason: riskReason,
+            modifiedAt: row["modified_at"]?.double.map(Date.init(timeIntervalSince1970:)),
             state: state,
             scannedAt: Date(timeIntervalSince1970: scannedAt)
         )

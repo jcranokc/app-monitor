@@ -1,0 +1,408 @@
+--- a
++++ b
+@@ -1,196 +1,258 @@
+-System Name
+-Title of Proposal
++App Monitor
++System & Product Review
+ STATUS
+-[Draft / Proposed / Approved]
++Implemented
+ OWNER
+-[Team Name]
++Jacob Crandall
+ LAST UPDATED
+-[Month, DD, YYYY]
++July 11, 2026
+ Authors
+-[Name(s)]
++OpenAI Codex
+ Reviewers
+-[Reviewer names, roles, or groups]
++Product owner; macOS engineering; security/privacy review
+ Related docs
+-[Link to related docs]
++README.md; PRIVACY.md; RELEASING.md; design handoffs
+ Scope
+-[One-sentence description of what this design covers]
++Architecture, live macOS UI, safety, operations, and five redesign directions.
+ 1.  Abstract
+-[Summarize the proposed system, the problem it solves, and the intended outcome. Describe the core design at a high level, including the main boundaries, dependencies, and guarantees. Keep this section concise enough that a reviewer can understand the proposal without reading the full document.]
+-[Describe the workloads and constraints this design must support. Clarify what the proposal does not attempt to solve, the assumptions it relies on, and the most important operational or implementation boundaries.]
++App Monitor is a local-first macOS utility that combines app inventory, foreground usage, storage analysis, update management, reversible cleanup, uninstall planning, and action history. The core is technically viable and currently healthy. This review also shipped a focused UX pass: the inspector is now contextual, primary destinations have unique names, provider filters are collapsed, Settings is pinned, toolbar options are consolidated, and raw login-item state is translated into plain language. The remaining risk is accumulated product and orchestration complexity concentrated in one SwiftUI screen and one main-actor model.
++The next architectural step is an action-first shell backed by domain coordinators, a versioned operation ledger, explicit scan/update coverage, and route-scoped detail state. The design remains native, single-user, and local-only on macOS 14+. It does not add accounts, a hosted backend, telemetry, or autonomous destructive behavior. External dependencies remain the local file system, macOS frameworks, Homebrew, mas, softwareupdate, and app-provided release feeds.
+ 2.  Goals and Non-Goals
+ Goals
+ Non-goals
+-[Goal 1: measurable outcome this design must achieve]
+-[Non-goal 1: explicitly excluded capability or outcome]
+-[Goal 2: reliability, scale, security, or user outcome]
+-[Non-goal 2: adjacent problem deferred to a later phase]
+-[Goal 3: required platform, policy, or operational capability]
+-[Non-goal 3: unsupported workflow, audience, or interface]
+-[Goal 4: rollout, reversibility, or blast-radius constraint]
+-[Non-goal 4: guarantee the design cannot or will not provide]
++Make the next useful action obvious within five seconds of launch.
++Replace dedicated package managers, malware scanners, or whole-disk visualizers.
++Keep cleanup, uninstall, and update actions previewable, reversible where possible, and fully auditable.
++Add cloud sync, user accounts, cross-device history, or product telemetry.
++Keep cached navigation responsive while scans and provider work run off the main actor with cancellation and coverage reporting.
++Auto-delete user data or install manual/restart updates without explicit policy and review.
++Ship the redesign incrementally behind a feature flag while preserving the existing SQLite database and provider test suite.
++Redesign every specialist analytics view before the navigation and orchestration foundation is stable.
+ 3.  Background and Problem Statement
+-[Describe the current state, the specific problem, and why the existing approach is no longer sufficient. Include relevant scale, reliability, security, cost, or developer-experience constraints, and explain the impact of leaving the problem unresolved.]
+-[Explain the proposed system boundary and the major responsibilities on each side. Name the primary components, how they interact, and which inputs determine behavior. State the key design principle or invariant that should guide implementation and review.]
++The audit started with a capable but crowded three-pane workspace. The sidebar mixed top-level destinations, quick filters, update provider sources, analytics, and maintenance; the persistent right inspector showed stale app detail on Updates, History, Settings, and analytics. The implemented pass now defaults every route to a full-width workspace, opens details only when relevant, gives destinations unique names, collapses source filters, pins Settings, and organizes settings copy into understandable sections. The strongest flow remains Quarantine Review because it explains the item, exact path, safety steps, and reversible queue in one place.
++The implementation reflects the same breadth: DashboardView.swift is 9,430 lines, AppModel.swift is 4,449 lines with more than 50 published properties, and AppDataStore.swift is 2,663 lines with many schema responsibilities. Caching already removed redraw-time SQLite work, but AppModel remains the owner of inventory, analytics, scanning, cleanup, updates, self-update, uninstall, scheduling, settings, selection, and history. The proposed boundary is: SwiftUI shell and route view models -> domain coordinators -> scanner/provider/executor adapters -> SQLite operation/state store and external macOS tools. The invariant is fail closed for destructive side effects and keep the UI driven by durable or explicitly transient state.
+ 4.  Proposed Architecture
+-Figure 1. [Proposed System Architecture].
++Figure 1. Proposed modular architecture for App Monitor.
+ Core components
+ Component
+ Responsibility
+ Primary storage
+ Failure behavior
+-[Component A]
+-[Describe its responsibility, inputs, and outputs.]
+-[Primary datastore or dependency]
+-[Describe behavior when this component fails.]
+-[Component B]
+-[Describe the core decision or processing responsibility.]
+-[Configuration, policy, or metadata store]
+-[Describe fail-open, fail-closed, or fallback behavior.]
+-[Component C]
+-[Describe downstream execution and response handling.]
+-[Queue, cache, adapter, or service dependency]
+-[Describe timeout, retry, and terminal failure behavior.]
+-[Component D]
+-[Describe durable state, audit, or lifecycle responsibilities.]
+-[Primary operational datastore]
+-[Describe write failure and recovery behavior.]
+-[Component E]
+-[Describe metrics, logs, traces, and alerting responsibilities.]
+-[Telemetry and analytics backend]
+-[Describe degraded-mode monitoring and escalation.]
++App shell + route view models
++Own navigation, route-specific state, contextual selection, accessibility labels, and rendering only.
++Published snapshots and transient selection
++Show last valid snapshot and a route-scoped error; never block the whole shell.
++Inventory & Usage coordinator
++Inventory scans, tracking, timeline/summary queries, retention, exclusions, and cached usage snapshots.
++apps, usage_segments, imported usage
++Tracking can pause; queries fall back to last durable data with freshness shown.
++Storage & Safety coordinator
++Storage jobs, coverage, health findings, cleanup policy, quarantine, restore, and uninstall plans.
++storage_items, findings, suggestions, action history
++Permission gaps are first-class coverage states; destructive execution fails closed.
++Update orchestrator
++Normalize providers, compute eligibility, run selected updates, reconcile results, and capture changelogs.
++app_updates, update runs/results, changelogs
++Provider failures remain isolated and auditable; manual/restart items are never auto-selected.
++Persistence + operation ledger
++Versioned migrations, transactions, run/item lifecycle, settings snapshots, integrity checks, and export boundaries.
++SQLite WAL database
++A required write failure blocks side effects; recovery uses idempotent rerun and reconciliation.
+ 5.  Request Lifecycle
+-[Describe how a request, event, or job enters the system and identify the required inputs.]
+-[Describe validation, authentication, authorization, and normalization at the system boundary.]
+-[Describe which configuration, policy, state, or dependency data is loaded before processing.]
+-[Describe the primary decision or processing step and the output it produces.]
+-[Describe which durable state must be written before side effects or downstream execution begin.]
+-[Describe downstream calls, retries, timeouts, budget limits, and terminal conditions.]
+-[Describe final state updates, the response or output, and the metrics, logs, and traces emitted.]
++A manual action, scheduled timer, app activation event, or usage event enters a domain coordinator with route filters, target IDs, and current settings.
++The coordinator normalizes paths/provider records, checks permissions and policy, rejects protected/symlinked/unsupported targets, and resolves the user-visible action type.
++It loads the last durable snapshot plus a frozen policy/settings snapshot; the UI immediately publishes a lightweight queued/running state.
++Scanner and provider work runs off the main actor with bounded concurrency, progress, cancellation, and provider-specific timeouts.
++Before cleanup, uninstall, restore, or update side effects begin, a run record and selected item set are persisted; inability to write fails closed.
++Each downstream result is recorded independently. Partial provider failure does not erase successful results, and restart/administrator requirements remain explicit terminal states.
++The coordinator reconciles installed/file-system state, closes the run, refreshes cached view snapshots, and exposes completion, failures, and restore/retry actions in History.
+ 6.  API and Data Contracts
+ Primary data contract
+ Field
+ Type
+ Required
+ Description
+-field_name_1
+-[Type]
+-[Yes / No]
+-[Describe meaning, validation, ownership, and lifecycle.]
+-field_name_2
+-[Type]
+-[Yes / No]
+-[Describe the source and permitted values.]
+-field_name_3
+-[Type]
+-[Yes / No]
+-[Describe versioning or compatibility requirements.]
+-field_name_4
+-[Type]
+-[Yes / No]
+-[Describe relationship to other identifiers or records.]
+-field_name_5
+-[Type]
+-[Yes / No]
+-[Describe privacy, retention, or audit constraints.]
+-field_name_6
+-[Type]
+-[Yes / No]
+-[Describe array, object, or nested structure semantics.]
+-field_name_7
+-[Type]
+-[Yes / No]
+-[Describe how this field affects system behavior.]
++operation_id
++UUID text
++Yes
++Stable run identifier for scan, update, cleanup, uninstall, restore, or import.
++kind
++Enum
++Yes
++Defines policy, lifecycle, eligible targets, and valid result states.
++target_id
++Text
++No
++App, provider, path, or aggregate scope; paths are standardized before persistence.
++requested_at
++Timestamp
++Yes
++Local audit time; completed_at is stored when the run reaches a terminal state.
++policy_snapshot
++Versioned JSON
++Yes
++Frozen cadence, safety, permission, and auto-eligibility settings used by this run.
++status
++Enum
++Yes
++queued, running, completed, partial, failed, cancelled, or needsRestart.
++item_results
++Nested records
++Yes
++Per-target status, message, bytes/version transition, side-effect evidence, and recovery link.
+ Contract guarantees
+-[State the ordering, durability, or validation guarantee that must hold before execution.]
+-[State how writes, attempts, or events are identified and ordered.]
+-[State which versions, identifiers, or inputs must be captured for audit and replay.]
+-[State what this data is and is not a source of truth for.]
+-The versioned schema or interface definition is published at 
+-[Link to interface or schema] and update it with each contract release.
++A side-effecting action must have a validated target set and durable run record before execution.
++Run IDs and item IDs are stable; reconciliation updates records instead of creating ambiguous duplicate history.
++Provider/source, from/to versions, target path, policy version, timestamps, and terminal outcome are captured for audit and recovery.
++SQLite is the source of truth for App Monitor observations and operations, not for external package-manager or file-system truth; reconciliation remains required.
++The schema is implemented in AppDataStore migrations and should be formalized as versioned migration files with a schema_version table.
++Keep migration fixtures and contract tests alongside AppMonitorCoreTests; publish human-readable field semantics in docs/.
+ 7. Consistency, Idempotency, and Replay
+-[Explain the consistency, idempotency, replay, ordering, or concurrency guarantees required by this design. Distinguish client-facing guarantees from internal analysis or recovery behavior, and identify where duplicate work or partial failure is acceptable.]
++App Monitor needs strong local ordering around side effects, but not distributed-system semantics. A serial datastore queue and SQLite WAL provide ordered writes; coordinators freeze policy per run and publish UI snapshots only after coherent state transitions. Read-only scans and provider checks may be repeated. Cleanup, uninstall, restore, and install actions require stable IDs, preflight validation, durable attempt records, and post-action reconciliation. Partial success is acceptable only when each item has an explicit terminal result and the UI does not imply atomic completion.
+ Scenario
+ Expected behavior
+ Reasoning
+-[Duplicate, replayed, or repeated input]
+-[Describe the stable response and state transition.]
+-[Explain how duplicate work or side effects are prevented.]
+-[Required write or dependency fails]
+-[Describe the error, retryability, and side-effect behavior.]
+-[Explain why the failure mode is safe and observable.]
+-[Timeout, partial failure, or downstream error]
+-[Describe retry, fallback, and budget behavior.]
+-[Explain how auditability and consistency are maintained.]
+-[Configuration changes during execution]
+-[Describe which version remains authoritative.]
+-[Explain how mid-request behavior changes are prevented.]
++Repeated scan or update check
++Coalesce while active or create a new run after the prior run closes; replace current snapshots deterministically.
++Read-only work is safe to repeat and durable history remains unambiguous.
++Run-record write fails
++Do not start destructive/update execution; surface a retryable storage error.
++Failing closed prevents unaudited side effects.
++Provider or item partially fails
++Persist per-item outcomes, mark the run partial, reconcile successful items, and offer scoped retry.
++A truthful partial state is safer than rollback claims the external tool cannot guarantee.
++Settings change mid-run
++Continue with the captured policy snapshot; new settings apply to the next run.
++Stable behavior and audit reconstruction require immutable per-run policy.
+ 8. Security and Privacy Considerations
+-[Describe authentication, authorization, and tenant or data-boundary requirements.]
+-[Describe data minimization, sensitive payload handling, and logging restrictions.]
+-[Describe credential, secret, key, and certificate storage and access requirements.]
+-[Describe safe defaults for administrative, replay, migration, and debugging tools.]
+-[Describe retention, deletion, residency, privacy, and audit requirements.]
++Single-user local trust boundary. Use standard macOS authorization only at the action that needs it; protected paths and Apple/system apps remain blocked.
++Usage history, paths, app inventory, and action history are sensitive. Keep them local, redact secrets from messages, and never add telemetry without a separate explicit design review.
++Credentials belong in Keychain or ephemeral authorization context only, never SQLite, UserDefaults, process arguments, exports, or logs. Self-update packages require checksum/signature validation.
++Cleanup defaults to quarantine; uninstall defaults high-risk paths off; symlink destinations are not followed; direct-download actions allow only trusted URL schemes and explicit user review.
++Add pause tracking, per-app exclusion, clear-history, and 30/90/365-day/forever retention. Show scan coverage and permission gaps so totals are not presented as complete when access is partial.
+ 9.  Operational Readiness
+ Signal
+ SLO or alert
+ Owner
+ Launch gate
+-[Success or completion rate]
+-[Target, measurement window, and page threshold]
+-[Owning team]
+-[Required / Recommended]
+-[Latency or processing time]
+-[Percentile target, alert threshold, and duration]
+-[Owning team]
+-[Required / Recommended]
+-[Fallback, retry, or error rate]
+-[Warning and paging thresholds by workload class]
+-[Owning team]
+-[Required / Recommended]
+-[Configuration or deployment drift]
+-[Condition that indicates unsafe divergence]
+-[Owning team]
+-[Required / Recommended]
+-[Recovery, replay, or integrity check]
+-[Synthetic or sampled validation cadence and target]
+-[Owning team]
+-[Required / Recommended]
+-Rollout constraint: [Describe dry-run, canary, feature-flag, validation, rollback, and promotion requirements before production launch.]
++Navigation response
++Target p95 <100 ms from click to cached content; no SQLite/file scan in SwiftUI body.
++App Monitor
++Required
++Progress visibility
++Visible progress/freshness within 250 ms; cancellation acknowledged within 1 s.
++App Monitor
++Required
++Provider completion
++>=95% successful provider checks excluding unavailable/uninstalled tools; failures isolated by source.
++Update orchestrator
++Required
++Audit completeness
++100% of side-effecting item attempts have run ID, target, policy snapshot, and terminal result.
++Operation ledger
++Required
++Restore/integrity
++100% deterministic fixture restores; zero silent migration or relationship loss in upgrade tests.
++Storage & persistence
++Required
++Rollout: feature-flag the new shell; seed deterministic data; run current/new shells against the same database; preserve a one-release rollback path; promote only after accessibility and destructive-action audit gates pass.
+ 10. Alternatives Considered
+ Alternative
+ Why it was considered
+ Why it was not selected
+-[Alternative 1]
+-[Describe the main benefit or reason to consider it.]
+-[Describe the decisive tradeoff or unmet requirement.]
+-[Alternative 2]
+-[Describe the relevant capability or simplicity.]
+-[Describe added complexity, risk, cost, or scope.]
+-[Alternative 3]
+-[Describe the potential performance or product benefit.]
+-[Describe explainability, maturity, or operational concerns.]
+-[Alternative 4]
+-[Describe the consistency or implementation appeal.]
+-[Describe the technical boundary that makes it unsuitable.]
++Keep extending the current shell
++Lowest short-term implementation cost.
++Perpetuates context mismatch and large AppModel/DashboardView blast radius.
++Adopt a full architecture framework
++Strong reducer/state conventions and testability.
++Large migration cost; domain coordinators deliver most value without framework lock-in.
++Split into separate usage, cleanup, and updater apps
++Each product becomes easier to explain.
++Loses the core differentiator: usage, storage, risk, and update context together.
++Add a cloud backend
++Cross-device sync and remote analytics become possible.
++Conflicts with local-first privacy, adds account/security operations, and is unnecessary for the current goal.
+ 11. Open Questions
+-[Open question 1: identify a decision that requires reviewer input before implementation.]
+-[Open question 2: identify an unresolved product, policy, or operational constraint.]
+-[Open question 3: identify a scale, deployment, or regional design choice.]
+-[Open question 4: identify an ownership, access-control, or tooling decision.]
++Which of the five UI directions should define the new shell and primary navigation model?
++Should route-specific inspector visibility persist independently after the contextual default has proven stable?
++What is the default usage-history retention period, and should excluded apps be dropped at capture time or filtered later?
++Which update classes may ever run automatically: managed Homebrew only, App Store, direct-download, or none without confirmation?
+ 12. Decision and Next Steps
+-[State the recommended decision and summarize the implementation sequence. Name the first milestone, the validation or dry-run stage, the initial production audience, and the conditions that must be met before broader rollout.]
++Ship the implemented contextual-inspector, simplified-navigation, toolbar, and settings-language pass as the current baseline. Then adopt an action-first product shell and refactor behind it rather than rewriting the core. Extract Inventory & Usage, Storage & Safety, Updates, and Persistence/Operations coordinators from AppModel; decompose DashboardView into route files; add a versioned operation ledger, cancellation, permission/coverage states, and deterministic preview data; then roll the selected shell direction out behind a feature flag while the current packaged app remains the rollback path.
+ Milestone
+ Deliverable
+ Exit criteria
+ M1
+-[Foundational implementation or dry-run capability]
+-[Measurable evidence that the foundation works safely]
++Extract route files and domain coordinators; preserve behavior and current database.
++56 tests and scripts/ci pass; no route performs datastore/file work in body; cached navigation target met.
+ M2
+-[Validation, tooling, migration, or audit capability]
+-[Acceptance test or reconstruction criteria]
++Versioned migrations, operation ledger, scan coverage, cancellation, retention/exclusion settings.
++Failure/replay fixtures pass; destructive attempts are 100% auditable; permission gaps are visible.
+ M3
+-[Limited production rollout]
+-[Stability period and severity threshold]
++Implement the selected UI direction behind a feature flag with deterministic demo state.
++Screenshot QA, keyboard traversal, VoiceOver labels, contrast, narrow-window, light/dark tests pass.
+ M4
+-[Broader customer or workload rollout]
+-[SLOs met, rollback tested, and approvals complete]
++Refine specialist Update, Storage, Activity, and History workspaces and retire the legacy shell.
++Stable beta period; no P0/P1 safety regressions; rollback tested; product metrics accepted.
++Appendix A. Product Design Audit
++Overall verdict: the product is capable and unusually transparent for a Mac maintenance utility. The completed UX pass removes the most visible orientation and space problems without changing the product's visual system or safety model. The best existing pattern remains Quarantine Review because it connects evidence, safety, and action.
++Highest-impact changes
++•  IMPLEMENTED — Give primary destinations unique names, collapse provider/source filters, and keep Settings pinned below the scrolling navigation list.
++•  IMPLEMENTED — Make the inspector contextual and hidden on navigation; expose a labeled Details control only when the route has inspectable content.
++•  IMPLEMENTED — Consolidate filtering, sorting, saved filters, and export under Options so Scan, Updates, and Cleanup remain readable.
++•  IMPLEMENTED — Group Settings around General, Full Scan Schedule, Update App Monitor, and Update Installed Software; translate login-item status into plain language.
++•  P1 — Turn the raw warning total into an actionable summary by severity, affected app, confidence, and recommended next action. Do not use a raw count as the primary signal.
++•  P1 — Keep long-running work in a compact status center. Progress must not push every route downward or disable unrelated inspection.
++•  P1 — Use progressive disclosure for changelogs and history. Keep the current task visible and open detailed timelines only on selection.
++•  P1 — Audit small labels, pale gray text, icon-only controls, focus order, keyboard hit targets, and non-color state labels in both light and dark themes.
++•  P1 — Say “space available for review,” not guaranteed savings. Show freshness and permission coverage next to totals.
++•  P2 — Scope search and filters explicitly so users know whether they affect apps, providers, storage paths, or usage analytics.
++Evidence and limits
++Evidence comes from a live July 11, 2026 capture of Overview, Installed App Updates, Quarantine Review, History, Settings, and Usage Trends in the locally built and signed app bundle. Screenshots support layout, hierarchy, wording, density, and visible state findings. They do not prove VoiceOver traversal, measured contrast, destructive-action correctness, permissions behavior, or narrow-window behavior; those require instrumented testing.
++Implemented Overview — full-width workspace, readable primary toolbar, unique navigation labels, collapsed advanced sources, and pinned Settings.
++Implemented Quarantine Review — the queue uses the full canvas and safety detail remains one explicit Details action away.
++Implemented Settings — route-relevant full-width content, plain-language sections, and a human-readable launch-at-login status.
++Appendix B. UI Revision Directions
++All five directions are grounded in the live product and preserve local-first, safety-first behavior. The choice should be based on the product’s primary promise, not surface styling alone.
++Direction 1 — Operations Console
++Best for a product promise centered on “what needs attention now.” Strongest synthesis of updates, warnings, and safe maintenance; requires careful prioritization rules.
++Direction 2 — Calm Mac Health
++Best for mainstream users who want reassurance and guided recommendations. Lowest cognitive load; risks hiding expert detail too early.
++Direction 3 — Update Command Center
++Best if broad update management becomes the lead differentiator. Excellent provider/release-note clarity; de-emphasizes usage and storage context.
++Direction 4 — Activity Timeline Workspace
++Best if personal usage intelligence becomes the lead product. Strong coordinated analysis; requires first-class retention/privacy controls.
++Direction 5 — Compact Pro Utility
++Best for expert users who value density, keyboard speed, and Finder-like inspection. Scales well; has the highest accessibility and onboarding burden.
++Appendix C. Prioritized Implementation Backlog
++The backlog separates product clarity from deep infrastructure work so the team can improve the experience without compromising safety or creating a rewrite-sized release.
++Priority / effort
++Change
++Success measure
++Done
++Contextual inspector + simplified navigation
++Route relevance, substantially more usable width, unique labels, and pinned Settings.
++P0 / M
++Split DashboardView and AppModel into route/domain files
++Files become reviewable; route changes no longer touch unrelated workflows.
++P0 / M
++Versioned operation ledger and fail-closed side effects
++100% destructive/update attempts reconstructable by run and item.
++P0 / S
++Settings categories + privacy controls
++Pause, exclusions, retention, clear history, and permission coverage are discoverable.
++P1 / M
++Cancelable scan jobs + compact status center
++Progress visible <250 ms; cancellation <1 s; unrelated routes remain usable.
++P1 / S
++Warning severity/confidence/action model
++Raw warning count replaced by prioritized, explainable review groups.
++P1 / M
++Deterministic demo database + screenshot states
++Reliable empty/loading/error/dense/light/dark visual regression coverage.
++P1 / M
++Accessibility validation matrix
++Keyboard, focus, VoiceOver labels, contrast, non-color states, and large text pass.
++P2 / L
++Incremental scans and persisted storage rollups
++Fast category/app refresh; historical deltas without loading all paths.

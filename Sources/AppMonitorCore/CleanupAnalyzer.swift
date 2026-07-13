@@ -26,9 +26,13 @@ public struct CleanupAnalyzer {
 
     private func suggestion(for row: AppUsageRow, item: StorageScanItem, now: Date) -> CleanupSuggestion? {
         guard item.sizeBytes >= 1_000_000 else { return nil }
-        guard item.category != .bundle, item.category != .preferences else { return nil }
+        guard !CleanupEvidencePolicy.isProtectedFromCleanupSuggestion(
+            category: item.category,
+            path: item.path,
+            app: row.app
+        ) else { return nil }
 
-        let unusedForThirtyDays = isUnused(row: row, days: 30, now: now)
+        let unusedForThirtyDays = isVerifiedUnused(row: row, days: 30, now: now)
         let lowRiskCategory = [
             .caches,
             .logs,
@@ -45,7 +49,8 @@ public struct CleanupAnalyzer {
             .cookies
         ].contains(item.category)
 
-        guard lowRiskCategory || (mediumReviewCategory && unusedForThirtyDays) else { return nil }
+        let hasRecentStorageEvidence = item.scannedAt >= now.addingTimeInterval(-7 * 24 * 60 * 60)
+        guard lowRiskCategory || (mediumReviewCategory && unusedForThirtyDays && hasRecentStorageEvidence) else { return nil }
 
         let severity = cleanupSeverity(sizeBytes: item.sizeBytes, category: item.category)
         let title = cleanupTitle(for: row, item: item, unusedForThirtyDays: unusedForThirtyDays)
@@ -69,8 +74,8 @@ public struct CleanupAnalyzer {
         )
     }
 
-    private func isUnused(row: AppUsageRow, days: Int, now: Date) -> Bool {
-        guard let lastSeen = row.lastSeen else { return true }
+    private func isVerifiedUnused(row: AppUsageRow, days: Int, now: Date) -> Bool {
+        guard let lastSeen = row.lastSeen else { return row.activityState == .verifiedInactive }
         return lastSeen < now.addingTimeInterval(TimeInterval(-days * 24 * 60 * 60))
     }
 

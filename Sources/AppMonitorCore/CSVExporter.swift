@@ -1,6 +1,26 @@
 import Foundation
 
 public enum CSVExporter {
+    public static func monitoringHistoryCSV(segments: [UsageSegment]) -> String {
+        let iso = ISO8601DateFormatter()
+        var lines = [[
+            "App", "Bundle Identifier", "Start", "End", "Duration Seconds", "Path"
+        ].csvLine]
+
+        for segment in segments {
+            lines.append([
+                segment.appName,
+                segment.bundleIdentifier ?? "",
+                iso.string(from: segment.startedAt),
+                iso.string(from: segment.endedAt),
+                String(Int(segment.durationSeconds.rounded())),
+                segment.appPath
+            ].csvLine)
+        }
+
+        return lines.joined(separator: "\n") + "\n"
+    }
+
     public static func appRowsCSV(rows: [AppUsageRow]) -> String {
         var lines = [
             [

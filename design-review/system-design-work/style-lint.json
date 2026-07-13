@@ -1,0 +1,172 @@
+{
+  "input": "/Users/jacob/Documents/App Monitor/design-review/App Monitor System and Product Design Review.docx",
+  "fonts_by_char_count": {
+    "Helvetica Neue": 19432,
+    "Arial": 44,
+    "Helvetica Neue Light": 11
+  },
+  "direct_run_formatting_runs": 256,
+  "direct_paragraph_formatting_paragraphs": 277,
+  "heading_like_paragraphs_not_heading_style": [
+    {
+      "para_index": 118,
+      "text": "Direction 1 \u2014 Operations Console",
+      "style": "normal"
+    },
+    {
+      "para_index": 122,
+      "text": "Direction 2 \u2014 Calm Mac Health",
+      "style": "normal"
+    },
+    {
+      "para_index": 126,
+      "text": "Direction 3 \u2014 Update Command Center",
+      "style": "normal"
+    },
+    {
+      "para_index": 130,
+      "text": "Direction 4 \u2014 Activity Timeline Workspace",
+      "style": "normal"
+    },
+    {
+      "para_index": 134,
+      "text": "Direction 5 \u2014 Compact Pro Utility",
+      "style": "normal"
+    },
+    {
+      "para_index": 148,
+      "text": "Authors",
+      "style": "normal"
+    },
+    {
+      "para_index": 150,
+      "text": "Reviewers",
+      "style": "normal"
+    },
+    {
+      "para_index": 152,
+      "text": "Related docs",
+      "style": "normal"
+    },
+    {
+      "para_index": 154,
+      "text": "Scope",
+      "style": "normal"
+    },
+    {
+      "para_index": 156,
+      "text": "Goals",
+      "style": "normal"
+    },
+    {
+      "para_index": 157,
+      "text": "Non-goals",
+      "style": "normal"
+    },
+    {
+      "para_index": 166,
+      "text": "Component",
+      "style": "normal"
+    },
+    {
+      "para_index": 167,
+      "text": "Responsibility",
+      "style": "normal"
+    },
+    {
+      "para_index": 168,
+      "text": "Primary storage",
+      "style": "normal"
+    },
+    {
+      "para_index": 169,
+      "text": "Failure behavior",
+      "style": "normal"
+    },
+    {
+      "para_index": 190,
+      "text": "Field",
+      "style": "normal"
+    },
+    {
+      "para_index": 191,
+      "text": "Type",
+      "style": "normal"
+    },
+    {
+      "para_index": 192,
+      "text": "Required",
+      "style": "normal"
+    },
+    {
+      "para_index": 193,
+      "text": "Description",
+      "style": "normal"
+    },
+    {
+      "para_index": 222,
+      "text": "Scenario",
+      "style": "normal"
+    }
+  ],
+  "examples": {
+    "direct_paragraph_formatting": [
+      {
+        "para_index": 1,
+        "text": "",
+        "style": "normal"
+      },
+      {
+        "para_index": 2,
+        "text": "",
+        "style": "normal"
+      },
+      {
+        "para_index": 3,
+        "text": "",
+        "style": "normal"
+      },
+      {
+        "para_index": 4,
+        "text": "",
+        "style": "normal"
+      },
+      {
+        "para_index": 5,
+        "text": "",
+        "style": "normal"
+      }
+    ],
+    "direct_run_formatting": [
+      {
+        "para_index": 9,
+        "run_text": "App Monitor",
+        "style": "Title"
+      },
+      {
+        "para_index": 10,
+        "run_text": "System & Product Review",
+        "style": "Title"
+      },
+      {
+        "para_index": 22,
+        "run_text": "1.  Abstract",
+        "style": "Heading 1"
+      },
+      {
+        "para_index": 23,
+        "run_text": "App Monitor is a local-first macOS utility that combines app inventory, foregrou",
+        "style": "normal"
+      },
+      {
+        "para_index": 24,
+        "run_text": "This review recommends an action-first shell backed by domain coordinators, a ve",
+        "style": "normal"
+      }
+    ]
+  },
+  "notes": [
+    "Direct formatting is not always wrong, but it often causes inconsistent output when templates change.",
+    "Heading-like paragraphs not using Heading styles can break TOC and accessibility."
+  ]
+}

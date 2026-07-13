@@ -2,6 +2,98 @@ import XCTest
 @testable import AppMonitorCore
 
 final class AppMonitorCoreTests: XCTestCase {
+    func testNewInstallIsNotVerifiedInactiveBeforeObservationWindow() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let row = AppUsageRow(
+            app: sampleApp(installedAt: now.addingTimeInterval(-2 * 86_400)),
+            usageSeconds: 0,
+            lastUsed: nil,
+            bundleSizeBytes: 0,
+            relatedSizeBytes: 0,
+            warningCount: 0,
+            scannedAt: nil,
+            trackingStartedAt: now.addingTimeInterval(-90 * 86_400),
+            verifiedInactivityDays: 30,
+            activityEvaluatedAt: now
+        )
+
+        XCTAssertEqual(row.activityState, .noActivityRecorded)
+    }
+
+    func testTrackingRestartRequiresFreshObservationWindow() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let app = sampleApp(installedAt: now.addingTimeInterval(-365 * 86_400))
+        let collecting = AppUsageRow(
+            app: app,
+            usageSeconds: 0,
+            lastUsed: nil,
+            bundleSizeBytes: 0,
+            relatedSizeBytes: 0,
+            warningCount: 0,
+            scannedAt: nil,
+            trackingStartedAt: now.addingTimeInterval(-1 * 86_400),
+            verifiedInactivityDays: 30,
+            activityEvaluatedAt: now
+        )
+        let verified = AppUsageRow(
+            app: app,
+            usageSeconds: 0,
+            lastUsed: nil,
+            bundleSizeBytes: 0,
+            relatedSizeBytes: 0,
+            warningCount: 0,
+            scannedAt: nil,
+            trackingStartedAt: now.addingTimeInterval(-31 * 86_400),
+            verifiedInactivityDays: 30,
+            activityEvaluatedAt: now
+        )
+
+        XCTAssertEqual(collecting.activityState, .noActivityRecorded)
+        XCTAssertEqual(verified.activityState, .verifiedInactive)
+    }
+
+    func testMissingUsageDoesNotUnlockMediumRiskCleanupWithoutVerifiedRecentEvidence() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let app = sampleApp(installedAt: now.addingTimeInterval(-365 * 86_400))
+        let row = AppUsageRow(
+            app: app,
+            usageSeconds: 0,
+            lastUsed: nil,
+            bundleSizeBytes: 0,
+            relatedSizeBytes: 500_000_000,
+            warningCount: 0,
+            scannedAt: now,
+            trackingStartedAt: now.addingTimeInterval(-1 * 86_400),
+            verifiedInactivityDays: 30,
+            activityEvaluatedAt: now
+        )
+        let item = StorageScanItem(
+            appID: app.id,
+            category: .applicationSupport,
+            path: "/tmp/support",
+            sizeBytes: 500_000_000,
+            scannedAt: now
+        )
+
+        XCTAssertTrue(CleanupAnalyzer().suggestions(for: row, items: [item], now: now).isEmpty)
+    }
+
+    func testAdoptionCandidatesDoNotCountAsAvailableUpdates() {
+        XCTAssertTrue(AppUpdateStatus.available.countsAsAvailable)
+        XCTAssertTrue(AppUpdateStatus.manualAction.countsAsAvailable)
+        XCTAssertFalse(AppUpdateStatus.adoptable.countsAsAvailable)
+        XCTAssertTrue(AppUpdateStatus.adoptable.countsAsAdoptionCandidate)
+        XCTAssertFalse(AppUpdateStatus.available.countsAsAdoptionCandidate)
+    }
+    func testAccessibilityIdentifiersAreStableAndUnique() {
+        let identifiers = AppAccessibilityIdentifier.staticIdentifiers
+
+        XCTAssertEqual(Set(identifiers).count, identifiers.count)
+        XCTAssertTrue(identifiers.allSatisfy { $0.hasPrefix("app-monitor.") })
+        XCTAssertEqual(AppAccessibilityIdentifier.appRow("com.example.Test App"), "app-monitor.apps.row.com-example-test-app")
+        XCTAssertEqual(AppAccessibilityIdentifier.updateSelection("brew|cask"), "app-monitor.updates.selection.brew-cask")
+    }
+
     func testPeriodTodayStartsAtLocalMidnight() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -15,8 +107,8 @@ final class AppMonitorCoreTests: XCTestCase {
 
     func testRowsIncludeZeroUsageApps() throws {
         let store = try temporaryStore()
-        let active = sampleApp(name: "Active App", path: "/Applications/Active.app")
-        let idle = sampleApp(name: "Idle App", path: "/Applications/Idle.app")
+        let active = sampleApp(name: "Active App", bundleID: "com.example.active", path: "/Applications/Active.app")
+        let idle = sampleApp(name: "Idle App", bundleID: "com.example.idle", path: "/Applications/Idle.app")
         try store.upsertApps([active, idle])
 
         var calendar = Calendar(identifier: .gregorian)
@@ -60,6 +152,54 @@ final class AppMonitorCoreTests: XCTestCase {
 
         let row = try XCTUnwrap(store.fetchRows(period: .today, includeAll: false, now: now, calendar: calendar).first)
         XCTAssertEqual(row.usageSeconds, 600, accuracy: 0.1)
+    }
+
+    func testMonitoringHistoryCanBeSummarizedExportedPrunedAndDeleted() throws {
+        let store = try temporaryStore()
+        let app = sampleApp()
+        try store.upsertApps([app])
+        let oldStart = Date(timeIntervalSince1970: 1_700_000_000)
+        let recentStart = Date(timeIntervalSince1970: 1_800_000_000)
+
+        for start in [oldStart, recentStart] {
+            try store.insertUsageSegment(UsageSegment(
+                appID: app.id,
+                bundleIdentifier: app.bundleIdentifier,
+                appName: app.name,
+                appPath: app.path,
+                startedAt: start,
+                endedAt: start.addingTimeInterval(60)
+            ))
+        }
+        try store.replaceImportedUsage([
+            ImportedUsageHistory(
+                appID: app.id,
+                lastUsed: recentStart,
+                useCount: 3,
+                usedDays: [oldStart, recentStart],
+                importedAt: recentStart
+            )
+        ])
+
+        var summary = try store.monitoringHistorySummary()
+        XCTAssertEqual(summary.eventCount, 2)
+        XCTAssertEqual(summary.earliestEventAt, oldStart)
+        XCTAssertEqual(summary.latestEventAt, recentStart.addingTimeInterval(60))
+        XCTAssertEqual(summary.importedAppCount, 1)
+
+        let csv = CSVExporter.monitoringHistoryCSV(segments: try store.fetchAllUsageSegments())
+        XCTAssertTrue(csv.contains("App,Bundle Identifier,Start,End,Duration Seconds,Path"))
+        XCTAssertTrue(csv.contains(app.name))
+
+        XCTAssertEqual(try store.deleteMonitoringHistory(before: Date(timeIntervalSince1970: 1_750_000_000)), 1)
+        summary = try store.monitoringHistorySummary()
+        XCTAssertEqual(summary.eventCount, 1)
+        XCTAssertEqual(summary.importedAppCount, 1)
+
+        XCTAssertEqual(try store.deleteMonitoringHistory(), 1)
+        summary = try store.monitoringHistorySummary()
+        XCTAssertEqual(summary.eventCount, 0)
+        XCTAssertEqual(summary.importedAppCount, 0)
     }
 
     func testTimelineSessionsSplitAtDayBoundariesAndClipToPeriod() throws {
@@ -411,6 +551,28 @@ final class AppMonitorCoreTests: XCTestCase {
         XCTAssertEqual(try store.fetchCleanupSuggestions().first?.state, .approved)
     }
 
+    func testQuarantineReviewRequestSurvivesCleanupRefresh() throws {
+        let store = try temporaryStore()
+        let app = sampleApp()
+        let suggestion = CleanupSuggestion(
+            id: "\(app.id)|large-file-review|/tmp/big.bin",
+            appID: app.id,
+            title: "Large file review",
+            path: "/tmp/big.bin",
+            category: .caches,
+            sizeBytes: 500_000_000,
+            severity: .medium,
+            rationale: "test",
+            riskNotes: "test",
+            state: .reviewRequested
+        )
+
+        try store.saveCleanupSuggestion(suggestion)
+        try store.replaceCleanupSuggestions(for: app.id, suggestions: [])
+
+        XCTAssertEqual(try store.fetchCleanupSuggestions().first?.state, .reviewRequested)
+    }
+
     func testLargeFileReviewStateSurvivesRefresh() throws {
         let store = try temporaryStore()
         let app = sampleApp()
@@ -421,14 +583,17 @@ final class AppMonitorCoreTests: XCTestCase {
             category: .caches,
             sizeBytes: 500_000_000,
             riskScore: 35,
-            riskReason: "test"
+            riskReason: "test",
+            modifiedAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
 
         try store.replaceLargeFiles([record])
         try store.updateLargeFileState(id: record.id, state: .ignored)
         try store.replaceLargeFiles([record])
 
-        XCTAssertEqual(try store.fetchLargeFiles().first?.state, .ignored)
+        let stored = try store.fetchLargeFiles().first
+        XCTAssertEqual(stored?.state, .ignored)
+        XCTAssertEqual(stored?.modifiedAt?.timeIntervalSince1970, record.modifiedAt?.timeIntervalSince1970)
     }
 
     func testSavedFiltersAndScanSchedulePersist() throws {
@@ -476,6 +641,8 @@ final class AppMonitorCoreTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let file = directory.appendingPathComponent("large.dat")
         try Data(repeating: 1, count: 2_000_000).write(to: file)
+        let modifiedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        try FileManager.default.setAttributes([.modificationDate: modifiedAt], ofItemAtPath: file.path)
 
         let item = StorageScanItem(
             appID: "app",
@@ -488,6 +655,7 @@ final class AppMonitorCoreTests: XCTestCase {
         XCTAssertEqual(records.count, 1)
         XCTAssertEqual(records.first?.path, file.path)
         XCTAssertEqual(records.first?.category, .caches)
+        XCTAssertEqual(records.first?.modifiedAt?.timeIntervalSince1970 ?? 0, modifiedAt.timeIntervalSince1970, accuracy: 1)
     }
 
     func testStorageScannerReportsLargeFileProgress() throws {
@@ -1781,11 +1949,116 @@ final class AppMonitorCoreTests: XCTestCase {
         XCTAssertTrue(csv.contains("/Applications/Comma.app"))
     }
 
+    func testWarningTriagePersistsSnapshotDispositionAndHistory() throws {
+        let store = try temporaryStore()
+        let warning = AppWarningItem(
+            id: "health|app-1|Code Signing|Code Signature Issue",
+            appID: "app-1",
+            appName: "Example",
+            appPath: "/Applications/Example.app",
+            bundleIdentifier: "com.example.app",
+            title: "Code Signature Issue",
+            detail: "codesign rejected the bundle",
+            recommendation: "Reinstall from a trusted source.",
+            severity: .critical,
+            category: .security,
+            source: "Code Signing"
+        )
+
+        try store.upsertWarningTriageRecord(
+            warning: warning,
+            disposition: .acknowledged,
+            action: "Acknowledged",
+            detail: "Reviewed by user"
+        )
+        try store.upsertWarningTriageRecord(
+            warning: warning,
+            disposition: .falsePositive,
+            action: "False Positive",
+            detail: "Known local development build"
+        )
+
+        let record = try XCTUnwrap(store.fetchWarningTriageRecords().first)
+        XCTAssertEqual(record.warningID, warning.id)
+        XCTAssertEqual(record.disposition, .falsePositive)
+        XCTAssertEqual(record.snapshot, warning)
+
+        let events = try store.fetchWarningTriageHistory()
+        XCTAssertEqual(events.count, 2)
+        XCTAssertEqual(events.first?.action, "False Positive")
+        XCTAssertEqual(Set(events.map(\.warningID)), [warning.id])
+    }
+
+    func testWarningTriageEventDoesNotDuplicateRecord() throws {
+        let store = try temporaryStore()
+        let warning = AppWarningItem(
+            id: "storage|app-1|Caches|/tmp/cache",
+            appID: "app-1",
+            appName: "Example",
+            appPath: "/Applications/Example.app",
+            bundleIdentifier: nil,
+            title: "Cache Scan Warning",
+            detail: "Unable to enumerate",
+            recommendation: "Review the path.",
+            severity: .medium,
+            category: .storage,
+            source: "Storage Scan"
+        )
+
+        try store.upsertWarningTriageRecord(
+            warning: warning,
+            disposition: .open,
+            action: "Rechecked",
+            detail: "Still present"
+        )
+        try store.recordWarningTriageEvent(
+            warning: warning,
+            action: "Verification Failed",
+            detail: "Still present"
+        )
+
+        XCTAssertEqual(try store.fetchWarningTriageRecords().count, 1)
+        XCTAssertEqual(try store.fetchWarningTriageHistory().count, 2)
+    }
+
     private func temporaryStore() throws -> AppDataStore {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("AppMonitorTests-\(UUID().uuidString)", isDirectory: true)
         let url = directory.appendingPathComponent("test.sqlite")
         return try AppDataStore(databaseURL: url)
+    }
+
+    func testInventoryReconciliationPrefersInstalledAppOverDeveloperArtifact() {
+        let installed = sampleApp(path: "/Applications/Sample.app")
+        let buildArtifact = MonitoredApp(
+            id: "com.example.sample|/Users/test/Library/Developer/Xcode/DerivedData/App/Build/Products/Debug/Sample.app",
+            name: "Sample",
+            bundleIdentifier: "com.example.sample",
+            version: "1.0",
+            path: "/Users/test/Library/Developer/Xcode/DerivedData/App/Build/Products/Debug/Sample.app",
+            isUserFacing: false
+        )
+
+        let reconciled = AppInventoryScanner.reconcileInventory([buildArtifact, installed])
+
+        XCTAssertEqual(reconciled, [installed])
+    }
+
+    func testInventoryReconciliationKeepsAppsWithoutBundleIdentifiersDistinctByPath() {
+        let first = MonitoredApp(id: "one", name: "One", bundleIdentifier: nil, version: nil, path: "/Applications/One.app", isUserFacing: true)
+        let second = MonitoredApp(id: "two", name: "Two", bundleIdentifier: nil, version: nil, path: "/Applications/Two.app", isUserFacing: true)
+
+        XCTAssertEqual(AppInventoryScanner.reconcileInventory([first, second]).count, 2)
+    }
+
+    func testUnscannedStorageIsNotFormattedAsConfirmedZero() {
+        let app = sampleApp()
+        let unscanned = AppUsageRow(app: app, usageSeconds: 0, lastUsed: nil, bundleSizeBytes: 0, relatedSizeBytes: 0, warningCount: 0, scannedAt: nil)
+        let scannedEmpty = AppUsageRow(app: app, usageSeconds: 0, lastUsed: nil, bundleSizeBytes: 0, relatedSizeBytes: 0, warningCount: 0, scannedAt: Date())
+
+        XCTAssertNil(unscanned.scannedTotalSizeBytes)
+        XCTAssertEqual(AppMonitorFormatting.bytes(unscanned.scannedTotalSizeBytes), "Not scanned")
+        XCTAssertEqual(AppMonitorFormatting.bytes(scannedEmpty.scannedTotalSizeBytes), "0 KB")
     }
 
     private func sampleApp(

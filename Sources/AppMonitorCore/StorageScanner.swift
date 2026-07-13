@@ -132,7 +132,7 @@ public struct StorageScanner {
 
             guard let enumerator = fileManager.enumerator(
                 at: url,
-                includingPropertiesForKeys: [.isRegularFileKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey],
+                includingPropertiesForKeys: [.isRegularFileKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey, .contentModificationDateKey],
                 options: [.skipsHiddenFiles],
                 errorHandler: { _, _ in true }
             ) else {
@@ -182,6 +182,7 @@ public struct StorageScanner {
             sizeBytes: sizeBytes,
             riskScore: riskScore(category: item.category, sizeBytes: sizeBytes),
             riskReason: riskReason(category: item.category, sizeBytes: sizeBytes),
+            modifiedAt: (try? URL(fileURLWithPath: path).resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
             scannedAt: scannedAt
         )
     }

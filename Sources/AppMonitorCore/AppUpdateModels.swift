@@ -81,11 +81,15 @@ public enum AppUpdateStatus: String, Codable, CaseIterable, Identifiable, Sendab
 
     public var countsAsAvailable: Bool {
         switch self {
-        case .available, .needsAdmin, .needsRestart, .manualAction, .adoptable:
+        case .available, .needsAdmin, .needsRestart, .manualAction:
             return true
-        case .upToDate, .checking, .updating, .updated, .failed, .providerUnavailable, .skipped:
+        case .upToDate, .checking, .updating, .updated, .failed, .adoptable, .providerUnavailable, .skipped:
             return false
         }
+    }
+
+    public var countsAsAdoptionCandidate: Bool {
+        self == .adoptable
     }
 }
 
